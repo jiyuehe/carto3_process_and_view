@@ -28,7 +28,7 @@ import subprocess
 import time
 import configuration
 
-
+# functions for projecting electrodes onto the mesh and interpolating activation times
 def _closest_points_on_triangles(point, triangles):
     """Return the closest point on each triangle to a single 3-D point."""
     a, b, c = triangles[:, 0], triangles[:, 1], triangles[:, 2]
@@ -82,7 +82,6 @@ def _closest_points_on_triangles(point, triangles):
     result[mask] = a[mask] + ab[mask] * v[mask, None] + ac[mask] * w[mask, None]
     return result
 
-
 def _nearest_indices(query, reference, count, block_size=256):
     """Memory-bounded NumPy k-nearest-neighbour search."""
     count = min(count, len(reference))
@@ -104,7 +103,6 @@ def _nearest_indices(query, reference, count, block_size=256):
         indices[start:stop] = np.take_along_axis(nearest, order, axis=1)
         distances_sq[start:stop] = np.take_along_axis(nearest_distance, order, axis=1)
     return indices, distances_sq
-
 
 def project_electrodes_to_mesh(vertices, faces, electrodes):
     """Project each electrode onto its closest candidate mesh triangle."""
@@ -191,9 +189,8 @@ data_store.update({
 
 INTERPOLATION_DISTANCE_MM = 10.0
 
-
 def interpolate_activation_to_mesh(activation):
-    """Interpolate within 10 mm of valid projected electrodes; leave the rest gray."""
+    """Interpolate within INTERPOLATION_DISTANCE_MM of valid projected electrodes; leave the rest gray."""
     activation = np.asarray(activation, dtype=np.float64)
     valid = np.isfinite(activation) & (activation != 0)
     if not np.any(valid):
