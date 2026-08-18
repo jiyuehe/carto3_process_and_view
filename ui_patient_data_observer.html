@@ -27,6 +27,10 @@
                     <span class="toggle-text">Latest</span>
                 </label>
                 <button id="btnSave">Save</button>
+                <div id="saveProgress" class="save-progress" role="status" aria-live="polite" hidden>
+                    <span>Saving…</span>
+                    <span class="save-progress-track"><span class="save-progress-bar"></span></span>
+                </div>
                 <label class="toggle-switch">
                     <input type="checkbox" id="toggleFullHue">
                     <span class="toggle-slider"></span>
@@ -147,15 +151,42 @@
             const activation = appData.activation_uni;
             const colors = computeColors(activation);
 
-            // Atrium nodes: grey small dots
-            const nodePositions = appData.node_positions || [];
+            // Atrium triangular mesh. Faces and edges contain vertex indices.
+            const meshVertices = appData.mesh_vertex || [];
+            const meshFaces = appData.mesh_face || [];
+            const meshEdges = appData.mesh_dege || [];
             const atriumTrace = {
+                type: 'mesh3d',
+                x: meshVertices.map(p => p[0]),
+                y: meshVertices.map(p => p[1]),
+                z: meshVertices.map(p => p[2]),
+                i: meshFaces.map(face => face[0]),
+                j: meshFaces.map(face => face[1]),
+                k: meshFaces.map(face => face[2]),
+                color: 'rgb(160,160,160)',
+                opacity: 0.15,
+                showlegend: false,
+                hoverinfo: 'none',
+            };
+
+            // Overlay the supplied mesh edges so triangle boundaries remain visible.
+            const edgeX = [], edgeY = [], edgeZ = [];
+            meshEdges.forEach(([start, end]) => {
+                const startVertex = meshVertices[start];
+                const endVertex = meshVertices[end];
+                if (!startVertex || !endVertex) return;
+                edgeX.push(startVertex[0], endVertex[0], null);
+                edgeY.push(startVertex[1], endVertex[1], null);
+                edgeZ.push(startVertex[2], endVertex[2], null);
+            });
+            const meshEdgeTrace = {
                 type: 'scatter3d',
-                mode: 'markers',
-                x: nodePositions.map(p => p[0]),
-                y: nodePositions.map(p => p[1]),
-                z: nodePositions.map(p => p[2]),
-                marker: { size: 1, color: 'rgb(120,120,120)' },
+                mode: 'lines',
+                x: edgeX,
+                y: edgeY,
+                z: edgeZ,
+                line: { color: 'rgb(100,100,100)', width: 1 },
+                opacity: 0.15,
                 showlegend: false,
                 hoverinfo: 'none',
             };
@@ -172,14 +203,16 @@
                 }
             }
             
-            // Electrode positions with activation color — two separate mesh3d traces
-            // because mesh3d ignores alpha in facecolor; opacity is trace-level only.
+            // Draw activated electrodes in activation colors and unactivated electrodes in gray.
             const electrodePosAll = appData.electrode_positions;
 
-            const activePosns = [], activeColors = [];
+            const activePosns = [], activeColors = [], inactivePosns = [];
             electrodePosAll.forEach((pos, i) => {
                 if (activation[i] !== 0) {
-                    activePosns.push(pos);   activeColors.push(colors[i]);
+                    activePosns.push(pos);
+                    activeColors.push(colors[i]);
+                } else {
+                    inactivePosns.push(pos);
                 }
             });
 
@@ -190,6 +223,16 @@
                 y: activePosns.map(p => p[1]),
                 z: activePosns.map(p => p[2]),
                 marker: { size: 4, color: activeColors, opacity: 1 },
+                showlegend: false, hoverinfo: 'none',
+            };
+
+            const electrodeInactiveTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: inactivePosns.map(p => p[0]),
+                y: inactivePosns.map(p => p[1]),
+                z: inactivePosns.map(p => p[2]),
+                marker: { size: 4, color: 'rgb(128,128,128)', opacity: 0.3 },
                 showlegend: false, hoverinfo: 'none',
             };
 
@@ -233,7 +276,7 @@
                 layout.scene.camera = mesh_and_electrode.layout.scene.camera;
             }
             
-            Plotly.newPlot('mesh_and_electrode', [atriumTrace, electrodeActiveTrace, electrodeLabelTrace], layout, {
+            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, electrodeLabelTrace], layout, {
                 responsive: true
             });
         }
@@ -596,24 +639,31 @@
                 appData.activation_uni[electrodeId] = isNaN(newValue) ? 0 : newValue;
             });
 
-            const cleanResponse = await fetch('/api/clean', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ activation_uni: appData.activation_uni })
-            });
-            const cleanData = await cleanResponse.json();
-            if (cleanData.status === 'ok') {
-                renderElectrogram();
-            }
+            const saveButton = document.getElementById('btnSave');
+            const saveProgress = document.getElementById('saveProgress');
+            saveButton.disabled = true;
+            saveProgress.hidden = false;
 
-            await fetch('/api/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    activation_uni: appData.activation_uni,
-                    activation_bi: appData.activation_bi
-                })
-            });
+            try {
+                const response = await fetch('/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        activation_uni: appData.activation_uni,
+                        activation_bi: appData.activation_bi
+                    })
+                });
+                const result = await response.json();
+                if (!response.ok || result.status !== 'ok') {
+                    throw new Error(result.error || `HTTP ${response.status}`);
+                }
+            } catch (err) {
+                console.error('Failed to save activation times:', err);
+                alert(`Failed to save activation times: ${err.message}`);
+            } finally {
+                saveProgress.hidden = true;
+                saveButton.disabled = false;
+            }
         });
         
         // Initialize

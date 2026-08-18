@@ -129,6 +129,39 @@ button:disabled {
     cursor: not-allowed;
 }
 
+.save-progress[hidden] {
+    display: none;
+}
+
+.save-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.save-progress-track {
+    width: 80px;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: #e0e0e0;
+}
+
+.save-progress-bar {
+    display: block;
+    width: 45%;
+    height: 100%;
+    border-radius: inherit;
+    background: #666;
+    animation: save-progress 1s ease-in-out infinite;
+}
+
+@keyframes save-progress {
+    from { transform: translateX(-120%); }
+    to { transform: translateX(220%); }
+}
+
 .slider-container {
     display: flex;
     align-items: center;
