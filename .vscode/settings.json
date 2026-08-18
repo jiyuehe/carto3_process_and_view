@@ -1,5 +1,5 @@
 {
     "python.defaultInterpreterPath": "/home/j/Desktop/ssd/myenv/bin/python3", // Jay's computer
-    // "python.defaultInterpreterPath": "/home/j/Desktop/ssd/myenv/bin/python3", // Ruhi
+    // "python.defaultInterpreterPath": "/home/ruhi/Desktop/python virtual environment/bin/python3", // Ruhi
     "python.terminal.activateEnvironment": true,
 }
