@@ -18,19 +18,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__)) # get the path of the cu
 os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
 
-def directory_setup():
-    # directory folder
-    directory = {}
-    directory['home'] = script_dir
-    directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data npz')
-    directory['result'] = script_dir / 'result'
-
-    (directory['result']).mkdir(parents=True, exist_ok=True) # create the result directory if it doesn't exist
-
-    return directory
-
 def map_name():
-    map_id = 8 # 0 ~ 12
+    map_id = 11 # 0 ~ 12
 
     name_prefix = [
         '103_5-1-Rp-LA CS REF 300 50-50', # 0
@@ -44,8 +33,18 @@ def map_name():
         '109_3-LA FAM', # 8
         '110_1-LA FAM', # 9
         '111_6-LA', # 10
-        '111_6-LA PLAY', # 11
-        '112_6-LA CL 300' # 12
+        '112_6-LA CL 300' # 11
     ]
 
     return name_prefix[map_id]
+
+def directory_setup():
+    # directory folder
+    directory = {}
+    directory['home'] = script_dir
+    directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data npz')
+    directory['result'] = script_dir / 'result'
+
+    (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
+
+    return directory

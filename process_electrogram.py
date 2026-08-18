@@ -25,7 +25,7 @@ import configuration
 
 #%%
 # setting
-half_window_size = 400//2 # number of time points before and after the 2000 ms mark
+half_window_size = 300//2 # number of time points before and after the 2000 ms mark
 directory = configuration.directory_setup()
 name_prefix = configuration.map_name()
 
@@ -270,3 +270,5 @@ clinical_data['clinical_activation_bi'] = activation
 
 file_path = directory['data'] / f'{name_prefix}_clinical.npz'
 np.savez(file_path, **clinical_data)
+
+print('done')

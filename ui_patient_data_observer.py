@@ -42,7 +42,6 @@ data_store = {
     'node_positions': clinical_data['geometry_original_vertex'],
     'electrode_positions': clinical_data['electrode_positions'],
     'egm_uni_original': clinical_data['clinical_electrogram_unipolar_original'],
-    'egm_uni_refined': clinical_data['clinical_electrogram_unipolar_refined'],
     'egm_bi_original': clinical_data['clinical_electrogram_bipolar_original'],
     'egm_ref': clinical_data['clinical_electrogram_reference'],
     'activation_uni': clinical_data['clinical_activation_uni'],
@@ -74,7 +73,6 @@ def get_data():
 def get_electrograms():
     payload = request.get_json(silent=True) or {}
     electrode_ids = payload.get('electrode_ids') or []
-    is_refined = bool(payload.get('is_refined', False))
 
     try:
         electrode_ids = [int(e_id) for e_id in electrode_ids]
@@ -85,14 +83,14 @@ def get_electrograms():
     if any((e_id < 0 or e_id >= n_electrodes) for e_id in electrode_ids):
         return jsonify({'error': 'electrode_ids contains out-of-range index'}), 400
 
-    egm_uni = data_store['egm_uni_refined'] if is_refined else data_store['egm_uni_original']
-    egm_bi = None if is_refined else data_store['egm_bi_original']
+    egm_uni = data_store['egm_uni_original']
+    egm_bi = data_store['egm_bi_original']
     egm_ref = data_store['egm_ref']
 
     response = {
         'electrode_ids': electrode_ids,
         'egm_uni': [egm_uni[e_id].tolist() for e_id in electrode_ids],
-        'egm_bi': None if egm_bi is None else [egm_bi[e_id].tolist() for e_id in electrode_ids],
+        'egm_bi': [egm_bi[e_id].tolist() for e_id in electrode_ids],
         'egm_ref': [egm_ref[e_id].tolist() for e_id in electrode_ids],
     }
     return jsonify(response)
@@ -108,55 +106,11 @@ def save_activation_times():
 
     clinical_data = data_store['clinical_data']
     clinical_data['clinical_activation_uni'] = activation_uni
-    clinical_data['clinical_electrogram_unipolar_refined'] = data_store['egm_uni_refined']
 
     np.savez(save_path, **clinical_data)
     print(f"Saved updated activation times to {save_path}")
 
     return jsonify({'status': 'ok', 'path': str(save_path)})
-
-@app.route('/api/clean', methods=['POST'])
-def clean_electrogram():
-    egm_uni_original = data_store['egm_uni_original'].copy()
-
-    payload = request.get_json(silent=True) or {}
-    activation_uni_list = payload.get('activation_uni')
-    activation_uni = np.asarray(activation_uni_list, dtype=int)
-
-    egm_length = egm_uni_original.shape[1]
-    half_window_size = 25
-    decay_rate = 4.605 / half_window_size
-
-    egm_uni_refined = egm_uni_original.copy()
-    for e_id in range(len(egm_uni_refined)):
-        act = activation_uni[e_id]
-
-        if act == 0:
-            egm_uni_refined[e_id] = 0
-        else:
-            t1 = max(act - half_window_size, 0)
-            t2 = min(act + half_window_size, egm_length)
-            window = np.ones(egm_length)
-            if t1 > 0:
-                indices = np.arange(t1)
-                window[:t1] = np.exp(-decay_rate * (t1 - indices))
-            if t2 < egm_length:
-                indices = np.arange(t2, egm_length)
-                window[t2:] = np.exp(-decay_rate * (indices - t2))
-            
-            egm_uni_refined[e_id] = egm_uni_refined[e_id] * window
-
-    # update data store
-    data_store['egm_uni_refined'] = egm_uni_refined
-
-    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical.npz"
-    clinical_data = data_store['clinical_data']
-    clinical_data['clinical_electrogram_unipolar_refined'] = egm_uni_refined
-    np.savez(save_path, **clinical_data)
-    
-    print("Cleaned electrograms.")
-
-    return jsonify({'status': 'ok'})
 
 #%%
 if __name__ == '__main__':

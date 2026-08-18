@@ -46,14 +46,9 @@
                 </div>
                 <div class="plot-bottom-control plot-bottom-control-right">
                     <label class="toggle-switch">
-                        <input type="checkbox" id="toggleHideUnipolar">
+                        <input type="checkbox" id="toggleUnipolar">
                         <span class="toggle-slider"></span>
-                        <span class="toggle-text">Hide Unipolar Electrogram</span>
-                    </label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="toggleRefined">
-                        <span class="toggle-slider"></span>
-                        <span class="toggle-text">Show Refined Electrogram</span>
+                        <span class="toggle-text">Show Unipolar Electrogram</span>
                     </label>
                 </div>
             </div>
@@ -80,13 +75,12 @@
             renderElectrogram();
         }
 
-        async function fetchElectrogramData(electrodeIds, isRefined) {
+        async function fetchElectrogramData(electrodeIds) {
             const response = await fetch('/api/electrograms', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    electrode_ids: electrodeIds,
-                    is_refined: isRefined
+                    electrode_ids: electrodeIds
                 })
             });
             const payload = await response.json();
@@ -297,14 +291,13 @@
             }
 
             const requestId = ++electrogramRequestId;
-            const isRefined = document.getElementById('toggleRefined').checked;
-            const hideUnipolar = document.getElementById('toggleHideUnipolar').checked;
+            const showUnipolar = document.getElementById('toggleUnipolar').checked;
             const activationUni = appData.activation_uni;
             const shiftSpacing = 4;
 
             let electrogramData;
             try {
-                electrogramData = await fetchElectrogramData(electrodeIds, isRefined);
+                electrogramData = await fetchElectrogramData(electrodeIds);
             } catch (err) {
                 if (requestId !== electrogramRequestId) {
                     return;
@@ -344,11 +337,11 @@
                 }
                 const t = egmUni.map((_, idx) => idx);
                 const egmUniShifted = egmUni.map(val => val + i * shiftSpacing);
-                const egmBiShifted = (!isRefined && Array.isArray(egmBi) && egmBi.length > 0)
+                const egmBiShifted = (Array.isArray(egmBi) && egmBi.length > 0)
                     ? egmBi.map(val => val + i * shiftSpacing)
                     : null;
                 const visibleSignals = [];
-                if (!hideUnipolar) visibleSignals.push(egmUniShifted);
+                if (showUnipolar) visibleSignals.push(egmUniShifted);
                 if (egmBiShifted) visibleSignals.push(egmBiShifted);
 
                 if (Array.isArray(egmRefData[i]) && egmRefData[i].length > 0) {
@@ -366,13 +359,13 @@
                     });
                 }
 
-                if (!hideUnipolar) {
+                if (showUnipolar) {
                     traces.push({
                         type: 'scatter',
                         mode: 'lines',
                         x: t,
                         y: egmUniShifted,
-                        line: { color: 'blue', width: 1 },
+                        line: { color: 'magenta', width: 1 },
                         showlegend: false,
                         hovertemplate: `Time: %{x}<br><extra></extra>`
                     });
@@ -384,16 +377,16 @@
                         mode: 'lines',
                         x: t,
                         y: egmBiShifted,
-                        line: { color: 'magenta', width: 1 },
+                        line: { color: 'blue', width: 1 },
                         opacity: 0.7,
                         showlegend: false,
                     });
                 }
 
-                if (!hideUnipolar && activationUni[eId] !== 0 && activationUni[eId] < egmUni.length) {
+                if (egmBiShifted && activationUni[eId] !== 0 && activationUni[eId] < egmBi.length) {
                     const actTime = activationUni[eId];
-                    const actValue = egmUni[actTime] + i * shiftSpacing;
-                    traces.push({
+                    const actValue = egmBi[actTime] + i * shiftSpacing;
+                    bipolarTraces.push({
                         type: 'scatter',
                         mode: 'markers',
                         x: [actTime],
@@ -430,7 +423,7 @@
             
             const layout = {
                 title: {
-                    text: hideUnipolar ? 'magenta: bipolar, cyan: reference' : 'blue: unipolar, magenta: bipolar, cyan: reference',
+                    text: showUnipolar ? 'magenta: unipolar, blue: bipolar, cyan: reference' : 'blue: bipolar, cyan: reference',
                     font: { size: 12 }
                 },
                 xaxis: { 
@@ -583,17 +576,7 @@
             }
         });
 
-        document.getElementById('toggleRefined').addEventListener('change', () => {
-            if (document.getElementById('toggleEarliest').checked) {
-                showSortedElectrodes('earliest');
-            } else if (document.getElementById('toggleLatest').checked) {
-                showSortedElectrodes('latest');
-            } else {
-                renderElectrogram();
-            }
-        });
-
-        document.getElementById('toggleHideUnipolar').addEventListener('change', () => {
+        document.getElementById('toggleUnipolar').addEventListener('change', () => {
             if (document.getElementById('toggleEarliest').checked) {
                 showSortedElectrodes('earliest');
             } else if (document.getElementById('toggleLatest').checked) {
