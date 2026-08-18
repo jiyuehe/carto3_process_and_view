@@ -8,3 +8,7 @@ Screen capture of the user interface:
 # Setup
 Edit .vscode/settings.json: replace with your python virtual environment directory  
 Edit configuration.py: change the directory['data'] to your directory  
+
+Install dependencies:  
+Activate your python virtual environment, open terminal in this folder, type:  
+pip install -r requirements.txt  
