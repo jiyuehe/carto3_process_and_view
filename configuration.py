@@ -39,7 +39,8 @@ def directory_setup():
     # directory folder
     directory = {}
     directory['home'] = script_dir
-    directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data npz')
+    directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data npz') # Jay's computer
+    # directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data npz') # Ruhi
     directory['result'] = script_dir / 'result'
 
     (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
