@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='ui_patient_data_observer.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <div class="controls">
+            <div class="slider-container">
+                <span class="slider-label" id="pageLabel">Page</span>
+                <input type="range" id="pageSlider" min="0" max="0" value="0">
+                <button id="btnPrev">&lt;</button>
+                <button id="btnNext">&gt;</button>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleEarliest">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-text">Earliest</span>
+                </label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleLatest">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-text">Latest</span>
+                </label>
+                <button id="btnSave">Save</button>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleFullHue">
+                    <span class="toggle-slider"></span>
+                    <span class="toggle-text">Full HSV</span>
+                </label>
+            </div>
+        </div>
+        
+        <div class="visualization-container">
+            <div class="plot-3d-wrapper">
+                <div id="mesh_and_electrode" class="plot-3d"></div>
+            </div>
+            <div class="egm-section">
+                <div class="egm-with-inputs">
+                    <div id="plot_electrograms" class="plot-egm"></div>
+                    <div id="inputs_activation_times" class="input-container"></div>
+                </div>
+                <div class="plot-bottom-control plot-bottom-control-right">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggleHideUnipolar">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">Hide Unipolar Electrogram</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggleRefined">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">Show Refined Electrogram</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let appData = null;
+        let startIdx = 0;
+        let electrodesPerPage = 10;
+        let electrogramRequestId = 0;
+        
+        // Load data on page load
+        async function loadData() {
+            const response = await fetch('/api/data');
+            appData = await response.json();
+            if (!response.ok) {
+                throw new Error(appData.error || `HTTP ${response.status}`);
+            }
+
+            initializeSlider();
+            render3DPlot();
+            renderElectrogram();
+        }
+
+        async function fetchElectrogramData(electrodeIds, isRefined) {
+            const response = await fetch('/api/electrograms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    electrode_ids: electrodeIds,
+                    is_refined: isRefined
+                })
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+                throw new Error(payload.error || `HTTP ${response.status}`);
+            }
+            return payload;
+        }
+        
+        function computeColors(activation) {
+            // Filter out invalid activation times
+            const validActivations = activation.filter(a => a !== 0);
+            if (validActivations.length === 0) {
+                return activation.map(() => 'rgba(80,80,80,0.1)');
+            }
+            
+            const minVal = Math.min(...validActivations); // '...' operator to spread array into arguments: Math.min(validActivations[0], validActivations[1], validActivations[2], ...)
+            const maxVal = Math.max(...validActivations);
+            const range = maxVal - minVal;
+            
+            // Map activation times to colors using HSV
+            return activation.map(act => {
+                if (act === 0) { // no activation timing
+                    return 'rgba(80,80,80,0.1)'; // Gray, mostly transparent
+                }
+                
+                // Normalize to 0-1
+                const norm = range === 0 ? 0 : (act - minVal) / range;
+                
+                // HSV colormap: hue from 0 to 240/360 (blue to red), or full 0-1 hue range
+                const hue = document.getElementById('toggleFullHue').checked ? norm : norm * (240.0 / 360.0);
+                const saturation = 1.0;
+                const value = 1.0;
+                
+                // Convert HSV to RGB
+                const c = value * saturation;
+                const x = c * (1 - Math.abs(((hue * 6) % 2) - 1));
+                const m = value - c;
+                
+                let r, g, b;
+                const h = hue * 6;
+                if (h < 1) {
+                    [r, g, b] = [c, x, 0];
+                } else if (h < 2) {
+                    [r, g, b] = [x, c, 0];
+                } else if (h < 3) {
+                    [r, g, b] = [0, c, x];
+                } else if (h < 4) {
+                    [r, g, b] = [0, x, c];
+                } else {
+                    [r, g, b] = [x, 0, c];
+                }
+                
+                r = Math.round((r + m) * 255);
+                g = Math.round((g + m) * 255);
+                b = Math.round((b + m) * 255);
+                
+                return `rgba(${r},${g},${b},1)`;
+            });
+        }
+        
+        function render3DPlot(preserveCamera = false, electrodeIds = null) {
+            // Use unipolar activation for 3D plot coloring
+            const activation = appData.activation_uni;
+            const colors = computeColors(activation);
+
+            // Atrium nodes: grey small dots
+            const nodePositions = appData.node_positions || [];
+            const atriumTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: nodePositions.map(p => p[0]),
+                y: nodePositions.map(p => p[1]),
+                z: nodePositions.map(p => p[2]),
+                marker: { size: 1, color: 'rgb(120,120,120)' },
+                showlegend: false,
+                hoverinfo: 'none',
+            };
+
+            // Determine which electrodes to display labels for
+            let displayedElectrodes;
+            if (electrodeIds) {
+                displayedElectrodes = new Set(electrodeIds);
+            } else {
+                const endIdx = Math.min(startIdx + electrodesPerPage, appData.n_electrodes);
+                displayedElectrodes = new Set();
+                for (let i = startIdx; i < endIdx; i++) {
+                    displayedElectrodes.add(i);
+                }
+            }
+            
+            // Electrode positions with activation color — two separate mesh3d traces
+            // because mesh3d ignores alpha in facecolor; opacity is trace-level only.
+            const electrodePosAll = appData.electrode_positions;
+
+            const activePosns = [], activeColors = [];
+            electrodePosAll.forEach((pos, i) => {
+                if (activation[i] !== 0) {
+                    activePosns.push(pos);   activeColors.push(colors[i]);
+                }
+            });
+
+            const electrodeActiveTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: activePosns.map(p => p[0]),
+                y: activePosns.map(p => p[1]),
+                z: activePosns.map(p => p[2]),
+                marker: { size: 4, color: activeColors, opacity: 1 },
+                showlegend: false, hoverinfo: 'none',
+            };
+
+            // Labels for displayed electrodes as a separate scatter3d text-only trace
+            const labelTexts = electrodePosAll.map((_, i) => displayedElectrodes.has(i) ? i.toString() : '');
+            const electrodeLabelTrace = {
+                type: 'scatter3d',
+                mode: 'text',
+                x: electrodePosAll.map(p => p[0]),
+                y: electrodePosAll.map(p => p[1]),
+                z: electrodePosAll.map(p => p[2]),
+                text: labelTexts,
+                textposition: 'middle center',
+                textfont: { size: 16, color: `rgba(${0.5*255},${0.5*255},${0.5*255},1)`, family: 'Arial Black' },
+                showlegend: false,
+                hoverinfo: 'none',
+            };
+            
+            const layout = {
+                title: {
+                    text: appData.name_prefix,
+                    font: { size: 12 }
+                },
+                dragmode: 'orbit',
+                scene: {
+                    xaxis: { visible: false },
+                    yaxis: { visible: false },
+                    zaxis: { visible: false },
+                    aspectmode: 'data'
+                },
+                margin: { l: 0, r: 0, t: 40, b: 0 },
+                showlegend: true,
+                legend: { x: 0, y: 1 },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)'
+            };
+            
+            // If preserving camera, use existing layout with its camera settings
+            if (preserveCamera && document.getElementById('mesh_and_electrode').data) {
+                const mesh_and_electrode = document.getElementById('mesh_and_electrode');
+                layout.scene.camera = mesh_and_electrode.layout.scene.camera;
+            }
+            
+            Plotly.newPlot('mesh_and_electrode', [atriumTrace, electrodeActiveTrace, electrodeLabelTrace], layout, {
+                responsive: true
+            });
+        }
+        
+        function renderCombinedInputs(electrodeIds) {
+            if (!electrodeIds) {
+                const endIdx = Math.min(startIdx + electrodesPerPage, appData.n_electrodes);
+                electrodeIds = Array.from({ length: endIdx - startIdx }, (_, i) => startIdx + i);
+            }
+            const container = document.getElementById('inputs_activation_times');
+            container.innerHTML = '';
+            
+            // Loop in reverse order to match plot (bottom to top)
+            for (let i = electrodeIds.length - 1; i >= 0; i--) {
+                const eId = electrodeIds[i];
+
+                const row = document.createElement('div');
+                row.className = 'activation-row';
+
+                const label = document.createElement('div');
+                label.className = 'activation-label';
+                label.textContent = eId.toString();
+
+                const uniInput = document.createElement('input');
+                uniInput.type = 'number';
+                uniInput.className = 'activation-input';
+                uniInput.value = appData.activation_uni[eId] !== 0 ? appData.activation_uni[eId] : '';
+                uniInput.placeholder = '-';
+                uniInput.dataset.electrodeId = eId;
+
+                uniInput.addEventListener('change', (e) => {
+                    const electrodeId = parseInt(e.target.dataset.electrodeId);
+                    const newValue = parseInt(e.target.value);
+                    appData.activation_uni[electrodeId] = isNaN(newValue) ? 0 : newValue;
+                    render3DPlot(true); // Preserve camera view
+                    if (document.getElementById('toggleEarliest').checked) {
+                        showSortedElectrodes('earliest');
+                    } else if (document.getElementById('toggleLatest').checked) {
+                        showSortedElectrodes('latest');
+                    } else {
+                        renderElectrogram();
+                    }
+                });
+
+                row.appendChild(label);
+                row.appendChild(uniInput);
+                container.appendChild(row);
+            }
+        }
+
+        async function renderElectrogram(electrodeIds) {
+            if (!electrodeIds) {
+                const endIdx = Math.min(startIdx + electrodesPerPage, appData.n_electrodes);
+                electrodeIds = Array.from({ length: endIdx - startIdx }, (_, i) => startIdx + i);
+            }
+
+            const requestId = ++electrogramRequestId;
+            const isRefined = document.getElementById('toggleRefined').checked;
+            const hideUnipolar = document.getElementById('toggleHideUnipolar').checked;
+            const activationUni = appData.activation_uni;
+            const shiftSpacing = 4;
+
+            let electrogramData;
+            try {
+                electrogramData = await fetchElectrogramData(electrodeIds, isRefined);
+            } catch (err) {
+                if (requestId !== electrogramRequestId) {
+                    return;
+                }
+                Plotly.newPlot('plot_electrograms', [], {
+                    title: { text: `Failed to load electrograms: ${err.message}`, font: { size: 12 } },
+                    margin: { l: 60, r: 20, t: 40, b: 40 }
+                }, {
+                    responsive: true
+                });
+                renderCombinedInputs(electrodeIds);
+                return;
+            }
+
+            if (requestId !== electrogramRequestId) {
+                return;
+            }
+
+            const egmUniData = electrogramData.egm_uni || [];
+            const egmBiData = electrogramData.egm_bi;
+            const egmRefData = electrogramData.egm_ref || [];
+            const traces = [];
+            // Plot all bipolar signals last so they remain above every unipolar trace,
+            // including traces from adjacent electrodes that overlap after shifting.
+            const bipolarTraces = [];
+            const yTickVals = [];
+            const yTickText = [];
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            for (let i = 0; i < electrodeIds.length; i++) {
+                const eId = electrodeIds[i];
+                const egmUni = egmUniData[i];
+                const egmBi = egmBiData ? egmBiData[i] : null;
+                if (!Array.isArray(egmUni) || egmUni.length === 0) {
+                    continue;
+                }
+                const t = egmUni.map((_, idx) => idx);
+                const egmUniShifted = egmUni.map(val => val + i * shiftSpacing);
+                const egmBiShifted = (!isRefined && Array.isArray(egmBi) && egmBi.length > 0)
+                    ? egmBi.map(val => val + i * shiftSpacing)
+                    : null;
+                const visibleSignals = [];
+                if (!hideUnipolar) visibleSignals.push(egmUniShifted);
+                if (egmBiShifted) visibleSignals.push(egmBiShifted);
+
+                if (Array.isArray(egmRefData[i]) && egmRefData[i].length > 0) {
+                    const egmRef = egmRefData[i];
+                    const egmRefShifted = egmRef.map(val => val + i * shiftSpacing);
+                    visibleSignals.push(egmRefShifted);
+                    traces.push({
+                        type: 'scatter',
+                        mode: 'lines',
+                        x: t,
+                        y: egmRefShifted,
+                        line: { color: 'cyan', width: 1 },
+                        opacity: 0.7,
+                        showlegend: false,
+                    });
+                }
+
+                if (!hideUnipolar) {
+                    traces.push({
+                        type: 'scatter',
+                        mode: 'lines',
+                        x: t,
+                        y: egmUniShifted,
+                        line: { color: 'blue', width: 1 },
+                        showlegend: false,
+                        hovertemplate: `Time: %{x}<br><extra></extra>`
+                    });
+                }
+
+                if (egmBiShifted) {
+                    bipolarTraces.push({
+                        type: 'scatter',
+                        mode: 'lines',
+                        x: t,
+                        y: egmBiShifted,
+                        line: { color: 'magenta', width: 1 },
+                        opacity: 0.7,
+                        showlegend: false,
+                    });
+                }
+
+                if (!hideUnipolar && activationUni[eId] !== 0 && activationUni[eId] < egmUni.length) {
+                    const actTime = activationUni[eId];
+                    const actValue = egmUni[actTime] + i * shiftSpacing;
+                    traces.push({
+                        type: 'scatter',
+                        mode: 'markers',
+                        x: [actTime],
+                        y: [actValue],
+                        marker: { 
+                            symbol: 'x',
+                            size: 8,
+                            color: 'red',
+                            opacity: 0.7
+                        },
+                        showlegend: false,
+                    });
+                }
+                for (const signal of visibleSignals) {
+                    minY = Math.min(minY, ...signal);
+                    maxY = Math.max(maxY, ...signal);
+                }
+                yTickVals.push(i * shiftSpacing);
+                yTickText.push(eId.toString());
+            }
+
+            traces.push(...bipolarTraces);
+
+            if (traces.length === 0 || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
+                Plotly.newPlot('plot_electrograms', [], {
+                    title: { text: 'No electrogram data to display', font: { size: 12 } },
+                    margin: { l: 60, r: 20, t: 40, b: 40 }
+                }, {
+                    responsive: true
+                });
+                renderCombinedInputs(electrodeIds);
+                return;
+            }
+            
+            const layout = {
+                title: {
+                    text: hideUnipolar ? 'magenta: bipolar, cyan: reference' : 'blue: unipolar, magenta: bipolar, cyan: reference',
+                    font: { size: 12 }
+                },
+                xaxis: { 
+                    showgrid: true,
+                    zeroline: false
+                },
+                yaxis: { 
+                    tickvals: yTickVals,
+                    ticktext: yTickText,
+                    showgrid: false,
+                    range: [minY, maxY]
+                },
+                margin: { l: 60, r: 20, t: 40, b: 40 },
+                hovermode: 'closest',
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                shapes: [
+                    {
+                        type: 'line',
+                        x0: appData.clinical_electrogram_woi_start, x1: appData.clinical_electrogram_woi_start,
+                        y0: minY, y1: maxY,
+                        yref: 'y',
+                        line: { color: 'green', width: 1, }
+                    },
+                    {
+                        type: 'line',
+                        x0: appData.clinical_electrogram_woi_end, x1: appData.clinical_electrogram_woi_end,
+                        y0: minY, y1: maxY,
+                        yref: 'y',
+                        line: { color: 'green', width: 1, }
+                    }
+                ]
+            };
+            
+            Plotly.newPlot('plot_electrograms', traces, layout, {
+                responsive: true
+            });
+
+            renderCombinedInputs(electrodeIds);
+        }
+        
+        function initializeSlider() {
+            const maxPages = Math.ceil(appData.n_electrodes / electrodesPerPage);
+            const slider = document.getElementById('pageSlider');
+            slider.max = maxPages - 1;
+            slider.value = 0;
+            updateSliderLabel();
+        }
+        
+        function updateSliderLabel() {
+            const page = Math.floor(startIdx / electrodesPerPage) + 1;
+            const maxPages = Math.ceil(appData.n_electrodes / electrodesPerPage);
+            document.getElementById('pageLabel').innerHTML =
+                `Page ${page}/${maxPages}<br>(${appData.n_electrodes} electrodes)`;
+        }
+        
+        function navigateElectrodes(pageIndex) {
+            startIdx = pageIndex * electrodesPerPage;
+            if (startIdx >= appData.n_electrodes) {
+                startIdx = 0;
+            }
+            
+            updateSliderLabel();
+            render3DPlot(true); // Preserve camera view
+            renderElectrogram();
+        }
+        
+        // Event listeners
+        document.getElementById('pageSlider').addEventListener('input', (e) => {
+            navigateElectrodes(parseInt(e.target.value));
+        });
+        
+        document.getElementById('btnPrev').addEventListener('click', () => {
+            const slider = document.getElementById('pageSlider');
+            const maxPages = parseInt(slider.max) + 1;
+            let currentPage = parseInt(slider.value);
+            if (currentPage > 0) {
+                currentPage = currentPage - 1;
+            } else {
+                currentPage = maxPages - 1;
+            }
+            slider.value = currentPage;
+            navigateElectrodes(currentPage);
+        });
+        
+        document.getElementById('btnNext').addEventListener('click', () => {
+            const slider = document.getElementById('pageSlider');
+            const maxPages = parseInt(slider.max) + 1;
+            let currentPage = parseInt(slider.value);
+            if (currentPage < parseInt(slider.max)) {
+                currentPage = currentPage + 1;
+            } else {
+                currentPage = 0;
+            }
+            slider.value = currentPage;
+            navigateElectrodes(currentPage);
+        });
+        
+        function setSliderEnabled(enabled) {
+            document.getElementById('pageSlider').disabled = !enabled;
+            document.getElementById('btnPrev').disabled = !enabled;
+            document.getElementById('btnNext').disabled = !enabled;
+        }
+
+        function showSortedElectrodes(order) {
+            if (!appData) return;
+            const activation = appData.activation_uni;
+            const validIndices = activation
+                .map((a, i) => ({ id: i, val: a }))
+                .filter(x => x.val !== 0);
+            if (order === 'earliest') {
+                validIndices.sort((a, b) => a.val - b.val);
+            } else {
+                validIndices.sort((a, b) => b.val - a.val);
+            }
+            const ids = validIndices.slice(0, 10).map(x => x.id);
+            render3DPlot(true, ids);
+            renderElectrogram(ids);
+        }
+
+        document.getElementById('toggleEarliest').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.getElementById('toggleLatest').checked = false;
+                setSliderEnabled(false);
+                showSortedElectrodes('earliest');
+            } else {
+                setSliderEnabled(true);
+                navigateElectrodes(parseInt(document.getElementById('pageSlider').value));
+            }
+        });
+
+        document.getElementById('toggleLatest').addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.getElementById('toggleEarliest').checked = false;
+                setSliderEnabled(false);
+                showSortedElectrodes('latest');
+            } else {
+                setSliderEnabled(true);
+                navigateElectrodes(parseInt(document.getElementById('pageSlider').value));
+            }
+        });
+
+        document.getElementById('toggleFullHue').addEventListener('change', () => {
+            if (document.getElementById('toggleEarliest').checked) {
+                showSortedElectrodes('earliest');
+            } else if (document.getElementById('toggleLatest').checked) {
+                showSortedElectrodes('latest');
+            } else {
+                render3DPlot(true);
+            }
+        });
+
+        document.getElementById('toggleRefined').addEventListener('change', () => {
+            if (document.getElementById('toggleEarliest').checked) {
+                showSortedElectrodes('earliest');
+            } else if (document.getElementById('toggleLatest').checked) {
+                showSortedElectrodes('latest');
+            } else {
+                renderElectrogram();
+            }
+        });
+
+        document.getElementById('toggleHideUnipolar').addEventListener('change', () => {
+            if (document.getElementById('toggleEarliest').checked) {
+                showSortedElectrodes('earliest');
+            } else if (document.getElementById('toggleLatest').checked) {
+                showSortedElectrodes('latest');
+            } else {
+                renderElectrogram();
+            }
+        });
+
+        document.getElementById('btnSave').addEventListener('click', async () => {
+            if (!appData) return;
+
+            // Flush any uncommitted edits from inputs that haven't lost focus yet
+            document.querySelectorAll('.activation-input').forEach(input => {
+                const electrodeId = parseInt(input.dataset.electrodeId);
+                const newValue = parseInt(input.value);
+                appData.activation_uni[electrodeId] = isNaN(newValue) ? 0 : newValue;
+            });
+
+            const cleanResponse = await fetch('/api/clean', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ activation_uni: appData.activation_uni })
+            });
+            const cleanData = await cleanResponse.json();
+            if (cleanData.status === 'ok') {
+                renderElectrogram();
+            }
+
+            await fetch('/api/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    activation_uni: appData.activation_uni,
+                    activation_bi: appData.activation_bi
+                })
+            });
+        });
+        
+        // Initialize
+        loadData().catch(err => {
+            const meshDiv = document.getElementById('mesh_and_electrode');
+            const egmDiv = document.getElementById('plot_electrograms');
+            meshDiv.textContent = `Failed to load data: ${err.message}`;
+            egmDiv.textContent = 'See error above.';
+            console.error(err);
+        });
+    </script>
+</body>
+</html>
