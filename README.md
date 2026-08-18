@@ -6,4 +6,4 @@ Screen capture of the user interface:
 <img src="demo/demo.png" alt="Demo" width="800">
 
 Color wheel (HSV):  
-<img src="demo/hsv_color_map.png" alt="Demo" width="300">
+<img src="demo/hsv_color_wheel.png" alt="Demo" width="300">
