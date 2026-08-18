@@ -18,6 +18,8 @@ from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 import numpy as np
+from scipy.interpolate import RBFInterpolator
+from scipy.spatial import cKDTree
 from flask import Flask, render_template, jsonify, request
 
 import webbrowser
@@ -25,6 +27,106 @@ import threading
 import subprocess
 import time
 import configuration
+
+
+def _closest_points_on_triangles(point, triangles):
+    """Return the closest point on each triangle to a single 3-D point."""
+    a, b, c = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+    ab, ac = b - a, c - a
+    ap = point - a
+    d1 = np.einsum('ij,ij->i', ab, ap)
+    d2 = np.einsum('ij,ij->i', ac, ap)
+    result = np.empty_like(a)
+    assigned = (d1 <= 0) & (d2 <= 0)
+    result[assigned] = a[assigned]
+
+    bp = point - b
+    d3 = np.einsum('ij,ij->i', ab, bp)
+    d4 = np.einsum('ij,ij->i', ac, bp)
+    mask = (d3 >= 0) & (d4 <= d3) & ~assigned
+    result[mask] = b[mask]
+    assigned |= mask
+
+    vc = d1 * d4 - d3 * d2
+    mask = (vc <= 0) & (d1 >= 0) & (d3 <= 0) & ~assigned
+    denom = d1 - d3
+    v = np.divide(d1, denom, out=np.zeros_like(d1), where=denom != 0)
+    result[mask] = a[mask] + v[mask, None] * ab[mask]
+    assigned |= mask
+
+    cp = point - c
+    d5 = np.einsum('ij,ij->i', ab, cp)
+    d6 = np.einsum('ij,ij->i', ac, cp)
+    mask = (d6 >= 0) & (d5 <= d6) & ~assigned
+    result[mask] = c[mask]
+    assigned |= mask
+
+    vb = d5 * d2 - d1 * d6
+    mask = (vb <= 0) & (d2 >= 0) & (d6 <= 0) & ~assigned
+    denom = d2 - d6
+    w = np.divide(d2, denom, out=np.zeros_like(d2), where=denom != 0)
+    result[mask] = a[mask] + w[mask, None] * ac[mask]
+    assigned |= mask
+
+    va = d3 * d6 - d5 * d4
+    mask = (va <= 0) & ((d4 - d3) >= 0) & ((d5 - d6) >= 0) & ~assigned
+    denom = (d4 - d3) + (d5 - d6)
+    w = np.divide(d4 - d3, denom, out=np.zeros_like(d3), where=denom != 0)
+    result[mask] = b[mask] + w[mask, None] * (c[mask] - b[mask])
+    assigned |= mask
+
+    mask = ~assigned
+    denom = va + vb + vc
+    v = np.divide(vb, denom, out=np.zeros_like(vb), where=denom != 0)
+    w = np.divide(vc, denom, out=np.zeros_like(vc), where=denom != 0)
+    result[mask] = a[mask] + ab[mask] * v[mask, None] + ac[mask] * w[mask, None]
+    return result
+
+
+def _nearest_indices(query, reference, count, block_size=256):
+    """Memory-bounded NumPy k-nearest-neighbour search."""
+    count = min(count, len(reference))
+    reference_sq = np.einsum('ij,ij->i', reference, reference)
+    indices = np.empty((len(query), count), dtype=np.int32)
+    distances_sq = np.empty((len(query), count), dtype=np.float64)
+    for start in range(0, len(query), block_size):
+        stop = min(start + block_size, len(query))
+        q = query[start:stop]
+        distance = (
+            np.einsum('ij,ij->i', q, q)[:, None]
+            + reference_sq[None, :]
+            - 2.0 * q @ reference.T
+        )
+        np.maximum(distance, 0, out=distance)
+        nearest = np.argpartition(distance, count - 1, axis=1)[:, :count]
+        nearest_distance = np.take_along_axis(distance, nearest, axis=1)
+        order = np.argsort(nearest_distance, axis=1)
+        indices[start:stop] = np.take_along_axis(nearest, order, axis=1)
+        distances_sq[start:stop] = np.take_along_axis(nearest_distance, order, axis=1)
+    return indices, distances_sq
+
+
+def project_electrodes_to_mesh(vertices, faces, electrodes):
+    """Project each electrode onto its closest candidate mesh triangle."""
+    vertex_faces = [[] for _ in range(len(vertices))]
+    for face_id, face in enumerate(faces):
+        for vertex_id in face:
+            vertex_faces[int(vertex_id)].append(face_id)
+
+    nearby_vertices, _ = _nearest_indices(electrodes, vertices, count=4)
+    projected = np.empty_like(electrodes, dtype=np.float64)
+    projection_faces = np.empty(len(electrodes), dtype=np.int32)
+    triangles = vertices[faces]
+    for electrode_id, vertex_ids in enumerate(nearby_vertices):
+        candidates = np.unique(np.concatenate([vertex_faces[v] for v in vertex_ids]))
+        points = _closest_points_on_triangles(electrodes[electrode_id], triangles[candidates])
+        delta = points - electrodes[electrode_id]
+        distance_sq = np.einsum('ij,ij->i', delta, delta)
+        best = int(np.argmin(distance_sq))
+        projected[electrode_id] = points[best]
+        projection_faces[electrode_id] = candidates[best]
+
+    return projected, projection_faces
 
 #%%
 # setting
@@ -55,6 +157,82 @@ data_store = {
     'activation_bi': clinical_data['clinical_activation_bi'],
 }
 
+# Geometry-dependent projection is cached because it does not change when
+# activation times are edited.
+interpolation_cache = directory['result'] / f'{name_prefix}_mesh_interpolation.npz'
+try:
+    cached = np.load(interpolation_cache)
+    if (int(cached['algorithm_version']) != 2 or
+            cached['mesh_shape'].tolist() != list(data_store['mesh_vertex'].shape) or
+            cached['electrode_shape'].tolist() != list(data_store['electrode_positions'].shape)):
+        raise ValueError('stale interpolation cache')
+    projected_electrodes = cached['projected_electrodes']
+    projection_faces = cached['projection_faces']
+except (OSError, KeyError, ValueError):
+    projected_electrodes, projection_faces = (
+        project_electrodes_to_mesh(
+            data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions']
+        )
+    )
+    np.savez_compressed(
+        interpolation_cache,
+        algorithm_version=2,
+        mesh_shape=data_store['mesh_vertex'].shape,
+        electrode_shape=data_store['electrode_positions'].shape,
+        projected_electrodes=projected_electrodes,
+        projection_faces=projection_faces,
+    )
+
+data_store.update({
+    'projected_electrodes': projected_electrodes,
+    'projection_faces': projection_faces,
+})
+
+
+INTERPOLATION_DISTANCE_MM = 10.0
+
+
+def interpolate_activation_to_mesh(activation):
+    """Interpolate within 10 mm of valid projected electrodes; leave the rest gray."""
+    activation = np.asarray(activation, dtype=np.float64)
+    valid = np.isfinite(activation) & (activation != 0)
+    if not np.any(valid):
+        return np.full(len(data_store['mesh_vertex']), np.nan)
+
+    sample_points = data_store['projected_electrodes'][valid]
+    sample_values = activation[valid]
+
+    # Coincident projected locations make the local interpolation system singular.
+    # Combine them using their mean activation before fitting.
+    unique_points, inverse = np.unique(sample_points, axis=0, return_inverse=True)
+    if len(unique_points) != len(sample_points):
+        sums = np.bincount(inverse, weights=sample_values)
+        counts = np.bincount(inverse)
+        sample_values = sums / counts
+        sample_points = unique_points
+
+    mesh_vertices = data_store['mesh_vertex']
+    nearest_distance, _ = cKDTree(sample_points).query(mesh_vertices, k=1)
+    within_threshold = nearest_distance <= INTERPOLATION_DISTANCE_MM
+    mesh_activation = np.full(len(mesh_vertices), np.nan)
+    if not np.any(within_threshold):
+        return mesh_activation
+
+    if len(sample_points) == 1:
+        mesh_activation[within_threshold] = sample_values[0]
+        return mesh_activation
+
+    interpolator = RBFInterpolator(
+        sample_points,
+        sample_values,
+        kernel='linear',
+        degree=0,
+        neighbors=min(32, len(sample_points)),
+        smoothing=1e-10,
+    )
+    mesh_activation[within_threshold] = interpolator(mesh_vertices[within_threshold])
+    return mesh_activation
+
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
 @app.route('/')
 def index():
@@ -70,6 +248,8 @@ def get_data():
         'mesh_face': data_store['mesh_face'].tolist(),
         'mesh_edge': data_store['mesh_edge'].tolist(),
         'electrode_positions': data_store['electrode_positions'].tolist(),
+        # Interpolation is requested only after its UI toggle is enabled.
+        'mesh_activation': [None] * len(data_store['mesh_vertex']),
         'clinical_electrogram_woi_start': int(data_store['clinical_data']['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_data']['clinical_electrogram_woi_end']),
         'activation_uni': data_store['activation_uni'].tolist(),
@@ -104,6 +284,19 @@ def get_electrograms():
         'egm_ref': [egm_ref[e_id].tolist() for e_id in electrode_ids],
     }
     return jsonify(response)
+
+
+@app.route('/api/interpolate', methods=['POST'])
+def interpolate_activation():
+    payload = request.get_json(silent=True) or {}
+    activation = np.asarray(payload.get('activation_uni', []), dtype=np.float64)
+    if activation.shape != data_store['activation_uni'].shape:
+        return jsonify({'error': 'activation_uni has the wrong length'}), 400
+    mesh_activation = interpolate_activation_to_mesh(activation)
+    return jsonify({
+        'mesh_activation': [None if not np.isfinite(value) else float(value)
+                            for value in mesh_activation]
+    })
 
 @app.route('/api/save', methods=['POST'])
 def save_activation_times():

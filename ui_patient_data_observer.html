@@ -51,6 +51,11 @@
                 </div>
                 <div class="plot-bottom-control plot-bottom-control-right">
                     <label class="toggle-switch">
+                        <input type="checkbox" id="toggleInterpolateMesh">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">Interpolate to Mesh</span>
+                    </label>
+                    <label class="toggle-switch">
                         <input type="checkbox" id="toggleUnipolar">
                         <span class="toggle-slider"></span>
                         <span class="toggle-text">Show Unipolar Electrogram</span>
@@ -66,6 +71,7 @@
         let startIdx = 0;
         let electrodesPerPage = 10;
         let electrogramRequestId = 0;
+        let interpolationRequestId = 0;
         
         // Load data on page load
         async function loadData() {
@@ -146,11 +152,126 @@
                 return `rgba(${r},${g},${b},1)`;
             });
         }
+
+        function getActivationRange(activation) {
+            const valid = activation.filter(value => value !== 0 && Number.isFinite(value));
+            if (valid.length === 0) return { min: 0, max: 1 };
+            const min = Math.min(...valid);
+            const max = Math.max(...valid);
+            return { min, max: max === min ? min + 1 : max };
+        }
+
+        function getActivationColorscale() {
+            // Reuse the electrode color function so markers and surface agree.
+            const samples = Array.from({ length: 25 }, (_, index) => index + 1);
+            return computeColors(samples).map((color, index) => [
+                index / (samples.length - 1), color
+            ]);
+        }
+
+        function getMeshColorSettings(meshActivation, activationRange) {
+            const hasValues = meshActivation.some(value => value !== null);
+            if (!hasValues) {
+                return {
+                    intensity: meshActivation.map(() => 0),
+                    colorscale: [[0, 'rgb(160,160,160)'], [1, 'rgb(160,160,160)']],
+                    cmin: 0,
+                    cmax: 1
+                };
+            }
+
+            // Reserve the lower half of the color scale for the gray default.
+            // Valid activation values occupy the upper half, starting at cmin.
+            const span = activationRange.max - activationRange.min;
+            const maskedValue = activationRange.min - span;
+            const activationScale = getActivationColorscale();
+            return {
+                intensity: meshActivation.map(value => value === null ? maskedValue : value),
+                colorscale: [
+                    [0, 'rgb(160,160,160)'],
+                    [0.499999, 'rgb(160,160,160)'],
+                    ...activationScale.map(([position, color]) => [0.5 + 0.5 * position, color])
+                ],
+                cmin: maskedValue,
+                cmax: activationRange.max
+            };
+        }
+
+        function interpolateMeshActivation(activation) {
+            return appData.mesh_activation || appData.mesh_vertex.map(() => null);
+        }
+
+        async function refreshMeshInterpolation() {
+            const requestId = ++interpolationRequestId;
+            const response = await fetch('/api/interpolate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ activation_uni: appData.activation_uni })
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+            if (requestId !== interpolationRequestId) return;
+            appData.mesh_activation = payload.mesh_activation;
+            update3DActivationColors();
+        }
+
+        function splitElectrodesByActivation(activation) {
+            const colors = computeColors(activation);
+            const activePosns = [], activeColors = [], inactivePosns = [];
+            appData.electrode_positions.forEach((pos, index) => {
+                if (activation[index] !== 0) {
+                    activePosns.push(pos);
+                    activeColors.push(colors[index]);
+                } else {
+                    inactivePosns.push(pos);
+                }
+            });
+            return { activePosns, activeColors, inactivePosns };
+        }
+
+        function update3DActivationColors() {
+            const plot = document.getElementById('mesh_and_electrode');
+            if (!plot.data) return;
+            const activation = appData.activation_uni;
+            const meshActivation = interpolateMeshActivation(activation);
+            const range = getActivationRange(activation);
+            const meshColors = getMeshColorSettings(meshActivation, range);
+            const showMesh = document.getElementById('toggleInterpolateMesh').checked;
+            const { activePosns, activeColors, inactivePosns } = splitElectrodesByActivation(activation);
+
+            Plotly.restyle(plot, {
+                intensity: [meshColors.intensity],
+                colorscale: [meshColors.colorscale],
+                cmin: meshColors.cmin,
+                cmax: meshColors.cmax
+            }, [0]);
+            Plotly.restyle(plot, {
+                x: [activePosns.map(p => p[0])],
+                y: [activePosns.map(p => p[1])],
+                z: [activePosns.map(p => p[2])],
+                'marker.color': [activeColors]
+            }, [2]);
+            Plotly.restyle(plot, {
+                x: [inactivePosns.map(p => p[0])],
+                y: [inactivePosns.map(p => p[1])],
+                z: [inactivePosns.map(p => p[2])]
+            }, [3]);
+            Plotly.restyle(plot, {
+                'marker.color': [[range.min, range.max]],
+                'marker.colorscale': [getActivationColorscale()],
+                'marker.cmin': range.min,
+                'marker.cmax': range.max,
+                'marker.showscale': showMesh && activation.some(value => value !== 0)
+            }, [5]);
+        }
         
         function render3DPlot(preserveCamera = false, electrodeIds = null) {
             // Use unipolar activation for 3D plot coloring
             const activation = appData.activation_uni;
-            const colors = computeColors(activation);
+            const meshActivation = interpolateMeshActivation(activation);
+            const activationRange = getActivationRange(activation);
+            const meshColors = getMeshColorSettings(meshActivation, activationRange);
+            const showMesh = document.getElementById('toggleInterpolateMesh').checked;
 
             // Atrium triangular mesh. Faces and edges contain vertex indices.
             const meshVertices = appData.mesh_vertex || [];
@@ -164,8 +285,15 @@
                 i: meshFaces.map(face => face[0]),
                 j: meshFaces.map(face => face[1]),
                 k: meshFaces.map(face => face[2]),
+                intensity: meshColors.intensity,
+                intensitymode: 'vertex',
+                colorscale: meshColors.colorscale,
+                cmin: meshColors.cmin,
+                cmax: meshColors.cmax,
                 color: 'rgb(160,160,160)',
-                opacity: 0.15,
+                opacity: 1,
+                visible: showMesh,
+                showscale: false,
                 showlegend: false,
                 hoverinfo: 'none',
             };
@@ -188,6 +316,7 @@
                 z: edgeZ,
                 line: { color: 'rgb(100,100,100)', width: 1 },
                 opacity: 0.15,
+                visible: showMesh,
                 showlegend: false,
                 hoverinfo: 'none',
             };
@@ -207,15 +336,7 @@
             // Draw activated electrodes in activation colors and unactivated electrodes in gray.
             const electrodePosAll = appData.electrode_positions;
 
-            const activePosns = [], activeColors = [], inactivePosns = [];
-            electrodePosAll.forEach((pos, i) => {
-                if (activation[i] !== 0) {
-                    activePosns.push(pos);
-                    activeColors.push(colors[i]);
-                } else {
-                    inactivePosns.push(pos);
-                }
-            });
+            const { activePosns, activeColors, inactivePosns } = splitElectrodesByActivation(activation);
 
             const electrodeActiveTrace = {
                 type: 'scatter3d',
@@ -251,6 +372,28 @@
                 showlegend: false,
                 hoverinfo: 'none',
             };
+
+            // Use a separate invisible trace for the color bar so the gray mask
+            // used by the mesh never appears in the activation legend.
+            const activationColorbarTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: [meshVertices[0][0], meshVertices[0][0]],
+                y: [meshVertices[0][1], meshVertices[0][1]],
+                z: [meshVertices[0][2], meshVertices[0][2]],
+                marker: {
+                    size: 0.1,
+                    opacity: 0,
+                    color: [activationRange.min, activationRange.max],
+                    colorscale: getActivationColorscale(),
+                    cmin: activationRange.min,
+                    cmax: activationRange.max,
+                    showscale: showMesh && activation.some(value => value !== 0),
+                    colorbar: { title: 'Activation' }
+                },
+                showlegend: false,
+                hoverinfo: 'none'
+            };
             
             const layout = {
                 title: {
@@ -277,7 +420,7 @@
                 layout.scene.camera = mesh_and_electrode.layout.scene.camera;
             }
             
-            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, electrodeLabelTrace], layout, {
+            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, electrodeLabelTrace, activationColorbarTrace], layout, {
                 responsive: true
             });
         }
@@ -312,7 +455,10 @@
                     const electrodeId = parseInt(e.target.dataset.electrodeId);
                     const newValue = parseInt(e.target.value);
                     appData.activation_uni[electrodeId] = isNaN(newValue) ? 0 : newValue;
-                    render3DPlot(true); // Preserve camera view
+                    update3DActivationColors();
+                    if (document.getElementById('toggleInterpolateMesh').checked) {
+                        refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+                    }
                     if (document.getElementById('toggleEarliest').checked) {
                         showSortedElectrodes('earliest');
                     } else if (document.getElementById('toggleLatest').checked) {
@@ -611,12 +757,18 @@
         });
 
         document.getElementById('toggleFullHue').addEventListener('change', () => {
-            if (document.getElementById('toggleEarliest').checked) {
-                showSortedElectrodes('earliest');
-            } else if (document.getElementById('toggleLatest').checked) {
-                showSortedElectrodes('latest');
-            } else {
-                render3DPlot(true);
+            update3DActivationColors();
+        });
+
+        document.getElementById('toggleInterpolateMesh').addEventListener('change', (e) => {
+            const plot = document.getElementById('mesh_and_electrode');
+            const showMesh = e.target.checked;
+            Plotly.restyle(plot, { visible: showMesh }, [0, 1]);
+            Plotly.restyle(plot, {
+                'marker.showscale': showMesh && appData.activation_uni.some(value => value !== 0)
+            }, [5]);
+            if (showMesh) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
             }
         });
 

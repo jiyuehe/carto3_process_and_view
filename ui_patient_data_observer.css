@@ -51,6 +51,7 @@ body {
 
 .plot-bottom-control-right {
     justify-content: flex-end;
+    gap: 18px;
 }
 
 .plot-egm {
