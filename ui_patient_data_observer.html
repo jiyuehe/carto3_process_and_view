@@ -141,8 +141,10 @@
                     [r, g, b] = [0, c, x];
                 } else if (h < 4) {
                     [r, g, b] = [0, x, c];
-                } else {
+                } else if (h < 5) {
                     [r, g, b] = [x, 0, c];
+                } else {
+                    [r, g, b] = [c, 0, x];
                 }
                 
                 r = Math.round((r + m) * 255);
