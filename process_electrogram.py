@@ -270,8 +270,3 @@ clinical_data['clinical_activation_bi'] = activation
 
 file_path = directory['data'] / f'{name_prefix}_clinical.npz'
 np.savez(file_path, **clinical_data)
-
-#%%
-import subprocess
-import sys
-subprocess.run([sys.executable, 'ui_patient_data_observer.py'], check=True)

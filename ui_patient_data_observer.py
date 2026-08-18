@@ -104,7 +104,7 @@ def save_activation_times():
 
     activation_uni = np.asarray(activation_uni, dtype=int)
 
-    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical_data.npz"
+    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical.npz"
 
     clinical_data = data_store['clinical_data']
     clinical_data['clinical_activation_uni'] = activation_uni
@@ -149,7 +149,7 @@ def clean_electrogram():
     # update data store
     data_store['egm_uni_refined'] = egm_uni_refined
 
-    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical_data.npz"
+    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical.npz"
     clinical_data = data_store['clinical_data']
     clinical_data['clinical_electrogram_unipolar_refined'] = egm_uni_refined
     np.savez(save_path, **clinical_data)
