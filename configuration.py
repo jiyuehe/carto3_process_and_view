@@ -19,7 +19,7 @@ os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
 
 def map_name():
-    map_id = 0
+    map_id = 5
 
     name_prefix = [
         '103_5-2-1-1-3-Rp-ReLA CS REF 230', # 0, flutter
@@ -27,7 +27,7 @@ def map_name():
         '105_3-LA FAM', # 2, flutter
         '106_2-LA fam', # 3, flutter or focal?
         '107_3-LA CL 270', # 4, GOOD flutter reentry
-        '109_3-LA FAM', # 5, GOOD flutter reentry
+        '109_3-LA FAM', # 5, GOOD flutter reentry, most dense
         '110_1-LA FAM', # 6, GOOD flutter reentry
         '111_6-LA', # 7, flutter or focal?
         '112_6-LA CL 300' # 8, GOOD flutter reentry
