@@ -247,7 +247,7 @@
                 z: electrodePosAll.map(p => p[2]),
                 text: labelTexts,
                 textposition: 'middle center',
-                textfont: { size: 16, color: `rgba(${0.5*255},${0.5*255},${0.5*255},1)`, family: 'Arial Black' },
+                textfont: { size: 16, color: '#000000', family: 'Arial Black, Arial, sans-serif' },
                 showlegend: false,
                 hoverinfo: 'none',
             };
@@ -520,8 +520,8 @@
         function updateSliderLabel() {
             const page = Math.floor(startIdx / electrodesPerPage) + 1;
             const maxPages = Math.ceil(appData.n_electrodes / electrodesPerPage);
-            document.getElementById('pageLabel').innerHTML =
-                `Page ${page}/${maxPages}<br>(${appData.n_electrodes} electrodes)`;
+            document.getElementById('pageLabel').textContent =
+                `Page ${page}/${maxPages} (${appData.n_electrodes} electrodes)`;
         }
         
         function navigateElectrodes(pageIndex) {

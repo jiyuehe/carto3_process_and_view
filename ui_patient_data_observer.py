@@ -20,6 +20,10 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 import numpy as np
 from flask import Flask, render_template, jsonify, request
 
+import webbrowser
+import threading
+import subprocess
+import time
 import configuration
 
 #%%
@@ -120,13 +124,7 @@ def save_activation_times():
 
 #%%
 if __name__ == '__main__':
-    # open the patient data observer user interface
-    import webbrowser
-    import threading
-    import subprocess
-    import time
-
-    # Stop any stale server that is already listening on Flask's port.
+    # stop any stale server that is already listening on Flask's port.
     stopped_port = subprocess.run(
         ['fuser', '-k', '-TERM', '5000/tcp'],
         stdout=subprocess.DEVNULL,
@@ -136,5 +134,6 @@ if __name__ == '__main__':
     if stopped_port:
         time.sleep(0.5)
 
+    # open the patient data observer user interface
     threading.Timer(1.0, webbrowser.open, args=['http://127.0.0.1:5000']).start() # runs webbrowser.open on a background thread after a 1-second delay, while the main thread proceeds to start Flask. The 1-second delay gives Flask time to start up before the browser tries to connect
     app.run(debug=False, port=5000, host='0.0.0.0')
