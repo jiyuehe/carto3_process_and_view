@@ -19,21 +19,18 @@ os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
 
 def map_name():
-    map_id = 0 # 0 ~ 12
+    map_id = 8
 
     name_prefix = [
-        '103_5-1-Rp-LA CS REF 300 50-50', # 0
-        '103_5-2-1-1-3-Rp-ReLA CS REF 230', # 1
-        '103_5-2-1-1-ReLA CS REF 230', # 2
-        '103_5-LA CS REF', # 3
-        '104_2-LA fam', # 4
-        '105_3-LA FAM', # 5
-        '106_2-LA fam', # 6
-        '107_3-LA CL 270', # 7
-        '109_3-LA FAM', # 8
-        '110_1-LA FAM', # 9
-        '111_6-LA', # 10
-        '112_6-LA CL 300' # 11
+        '103_5-2-1-1-3-Rp-ReLA CS REF 230', # 0
+        '104_2-LA fam', # 1
+        '105_3-LA FAM', # 2
+        '106_2-LA fam', # 3
+        '107_3-LA CL 270', # 4
+        '109_3-LA FAM', # 5
+        '110_1-LA FAM', # 6
+        '111_6-LA', # 7
+        '112_6-LA CL 300' # 8
     ]
 
     return name_prefix[map_id]

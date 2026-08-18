@@ -42,7 +42,7 @@ data_store = {
     'node_positions': clinical_data['geometry_original_vertex'],
     'mesh_vertex': clinical_data['geometry_original_vertex'],
     'mesh_face': clinical_data['geometry_original_face'],
-    'mesh_dege': clinical_data['geometry_original_edge'],
+    'mesh_edge': clinical_data['geometry_original_edge'],
     'electrode_positions': clinical_data['electrode_positions'],
     'egm_uni_original': clinical_data['clinical_electrogram_unipolar_original'],
     'egm_bi_original': clinical_data['clinical_electrogram_bipolar_original'],
@@ -51,7 +51,7 @@ data_store = {
     'activation_bi': clinical_data['clinical_activation_bi'],
 }
 
-app = Flask(__name__, template_folder=script_dir, static_folder=script_dir, static_url_path='')
+app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
 @app.route('/')
 def index():
     return render_template('ui_patient_data_observer.html')
@@ -64,7 +64,7 @@ def get_data():
         'node_positions': data_store['node_positions'].tolist(),
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
-        'mesh_dege': data_store['mesh_dege'].tolist(),
+        'mesh_edge': data_store['mesh_edge'].tolist(),
         'electrode_positions': data_store['electrode_positions'].tolist(),
         'clinical_electrogram_woi_start': int(data_store['clinical_data']['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_data']['clinical_electrogram_woi_end']),

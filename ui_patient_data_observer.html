@@ -154,7 +154,7 @@
             // Atrium triangular mesh. Faces and edges contain vertex indices.
             const meshVertices = appData.mesh_vertex || [];
             const meshFaces = appData.mesh_face || [];
-            const meshEdges = appData.mesh_dege || [];
+            const meshEdges = appData.mesh_edge || [];
             const atriumTrace = {
                 type: 'mesh3d',
                 x: meshVertices.map(p => p[0]),
@@ -232,7 +232,7 @@
                 x: inactivePosns.map(p => p[0]),
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
-                marker: { size: 4, color: 'rgb(128,128,128)', opacity: 0.3 },
+                marker: { size: 2, color: 'rgb(128,128,128)', opacity: 0.15 },
                 showlegend: false, hoverinfo: 'none',
             };
 
