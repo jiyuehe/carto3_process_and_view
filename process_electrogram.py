@@ -21,7 +21,6 @@ import configuration
 
 #%%
 # setting
-half_window_size_of_woi = 300//2 # number of time points before and after the 2000 ms mark
 directory = configuration.directory_setup()
 name_prefix = configuration.map_name()
 
@@ -29,22 +28,20 @@ name_prefix = configuration.map_name()
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
 carto = {k: data[k] for k in data.files}
 
-data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
-mesh = {k: data[k] for k in data.files}
-
 #%%
 # recording segments data
 catheter = carto['catheter'].item()
-mapping_position_unipolar = catheter['mapping_position_unipolar']
 mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
 surface_electrogram = catheter['surface_electrogram']
 mapping_name_unipolar = catheter['mapping_name_unipolar']
 mapping_name_unipolar = [name.replace("MCC_Dx_UniPolar_", "") for name in mapping_name_unipolar]
 surface_name = catheter['surface_name']
 
+n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording segments
+mapping_electrogram_unipolar_activation = [None for _ in range(n_segment)]
+
 # loop through each recording segment
-n_segment = len(catheter['mapping_position_unipolar']) # number of recording segments
-for n in range(n_segment): # range(n_segment) or [some segment indices for debugging]
+for n in range(n_segment):
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
     egm_unipolar = mapping_electrogram_unipolar[n]
@@ -413,6 +410,8 @@ for n in range(n_segment): # range(n_segment) or [some segment indices for debug
         if len(correlation_peaks) != 0:
             activation_times_unipolar_refined[channel_idx] = correlation_peaks
 
+    mapping_electrogram_unipolar_activation[n] = activation_times_unipolar_refined
+
     debug_plot = 0
     if debug_plot: # plot the original electrograms, activation template, and refined activation times
         sample_axis = np.arange(n_samples)
@@ -492,53 +491,48 @@ for n in range(n_segment): # range(n_segment) or [some segment indices for debug
         plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
         plt.close()
 
-
-
-
 #%%
+# grab activations within a window of interest (WOI) around the 2000 ms mark for each recording segment
+half_window_size_of_woi = 300//2 # number of time points before and after the 2000 ms mark
+t_start = 2000 - half_window_size_of_woi # window of interest start time index
+t_end = 2000 + half_window_size_of_woi # window of interest end time index
 
+mapping_electrogram_unipolar_activation_within_woi = [None for _ in range(n_segment)]
+for n in range(n_segment): # range(n_segment) or [some segment indices for debugging]
+    print(f'recording segment id {n} in [0, {n_segment-1}]')
 
+    activation_times_unipolar_refined = mapping_electrogram_unipolar_activation[n]
+    if activation_times_unipolar_refined is None:
+        activation_times_unipolar_refined = [np.array([], dtype=int) for _ in range(n_channels)]
 
+    activation_times_within_woi = np.zeros((len(activation_times_unipolar_refined),), dtype=object)
+    for channel_idx in range(len(activation_times_unipolar_refined)):
+        activation_times = activation_times_unipolar_refined[channel_idx]
+        if activation_times is not None:
+            temp = activation_times[(activation_times >= t_start) & (activation_times <= t_end)]
+            if len(temp) != 0:
+                activation_times_within_woi[channel_idx] = temp[0]
 
+    mapping_electrogram_unipolar_activation_within_woi[n] = activation_times_within_woi
 
+catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
+catheter['mapping_electrogram_unipolar_activation_within_woi'] = mapping_electrogram_unipolar_activation_within_woi
 
+# convert sequence-like values to object arrays to avoid heterogeneous-shape errors
+catheter_to_save = {}
+for k, v in catheter.items():
+    # keep numpy arrays as-is, but coerce lists / sequences of arrays to object dtype
+    if isinstance(v, np.ndarray):
+        catheter_to_save[k] = v
+    else:
+        try:
+            catheter_to_save[k] = np.asarray(v, dtype=object)
+        except Exception:
+            # fallback: store original value as a single-object array
+            catheter_to_save[k] = np.asarray([v], dtype=object)
 
-
-
-# # grab the electrode positions and electrograms
-# electrode = carto['electrode']
-# electrode_positions_all = carto['electrode_positions']
-
-# #%%
-# # mask the electrograms to the window of interest
-# t_start = 2000-1 - half_window_size_of_woi # window of interest start time index
-# t_end = 2000-1 + half_window_size_of_woi # window of interest end time index
-
-# #%%
-# clinical_electrogram_unipolar_original = electrogram_unipolar_original
-# clinical_electrogram_bipolar_original = electrogram_bipolar_original
-# clinical_electrogram_unipolar_refined = electrogram_unipolar_original
-# clinical_electrogram_bipolar_refined = electrogram_bipolar_original
-# clinical_electrogram_reference = electrogram_reference_original
-
-# #%% 
-# # save data
-# clinical_data = {}
-# for key, value in mesh.items():
-#     clinical_data[key] = value
-
-# clinical_data['electrode_positions'] = electrode_positions
-# clinical_data['clinical_electrogram_unipolar_original'] = clinical_electrogram_unipolar_original
-# clinical_data['clinical_electrogram_bipolar_original'] = clinical_electrogram_bipolar_original
-# clinical_data['clinical_electrogram_unipolar_refined'] = clinical_electrogram_unipolar_refined
-# clinical_data['clinical_electrogram_bipolar_refined'] = clinical_electrogram_bipolar_refined
-# clinical_data['clinical_electrogram_reference'] = clinical_electrogram_reference
-# clinical_data['clinical_electrogram_woi_start'] = t_start
-# clinical_data['clinical_electrogram_woi_end'] = t_end
-# clinical_data['clinical_activation_uni'] = activation
-# clinical_data['clinical_activation_bi'] = activation
-
-# file_path = directory['data'] / f'{name_prefix}_clinical.npz'
-# np.savez(file_path, **clinical_data)
+# allow_pickle=True ensures object arrays are saved correctly
+file_path = directory['data'] / f'{name_prefix}_catheter.npz'
+np.savez(file_path, **catheter_to_save, allow_pickle=True)
 
 print('done')
