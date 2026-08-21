@@ -18,7 +18,7 @@ from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 import numpy as np
-from scipy.interpolate import RBFInterpolator
+from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import cKDTree
 from flask import Flask, render_template, jsonify, request
 
@@ -311,6 +311,44 @@ data_store.update({
 
 INTERPOLATION_DISTANCE_MM = 10.0
 
+
+def _build_linear_interpolator(sample_points, sample_values):
+    """Return a true linear interpolator with a local affine extrapolation fallback."""
+    sample_points = np.asarray(sample_points, dtype=np.float64)
+    sample_values = np.asarray(sample_values, dtype=np.float64)
+
+    def predictor(query_points):
+        query_points = np.asarray(query_points, dtype=np.float64)
+        if query_points.ndim == 1:
+            query_points = query_points[None, :]
+        if len(query_points) == 0:
+            return np.empty((0,), dtype=np.float64)
+        if len(sample_points) == 1:
+            return np.full(len(query_points), sample_values[0], dtype=np.float64)
+
+        interpolator = LinearNDInterpolator(sample_points, sample_values, fill_value=np.nan)
+        predicted = interpolator(query_points)
+        nan_mask = ~np.isfinite(predicted)
+        if not np.any(nan_mask):
+            return predicted
+
+        tree = cKDTree(sample_points)
+        k = min(8, len(sample_points))
+        _, neighbor_indices = tree.query(query_points[nan_mask], k=k)
+        neighbor_indices = np.asarray(neighbor_indices, dtype=int)
+
+        for row_idx, q in enumerate(query_points[nan_mask]):
+            idx = neighbor_indices[row_idx]
+            local_points = sample_points[idx]
+            local_values = sample_values[idx]
+            design = np.hstack([local_points, np.ones((len(local_points), 1))])
+            coeffs, *_ = np.linalg.lstsq(design, local_values, rcond=None)
+            predicted[np.flatnonzero(nan_mask)[row_idx]] = np.dot(np.hstack([q, 1.0]), coeffs)
+        return predicted
+
+    return predictor
+
+
 def interpolate_activation_to_mesh(activation):
     """Interpolate within INTERPOLATION_DISTANCE_MM of valid projected electrodes; leave the rest gray."""
     activation = np.asarray(activation, dtype=np.float64)
@@ -341,15 +379,9 @@ def interpolate_activation_to_mesh(activation):
         mesh_activation[within_threshold] = sample_values[0]
         return mesh_activation
 
-    interpolator = RBFInterpolator(
-        sample_points,
-        sample_values,
-        kernel='linear',
-        degree=0,
-        neighbors=min(32, len(sample_points)),
-        smoothing=1e-10,
-    )
-    mesh_activation[within_threshold] = interpolator(mesh_vertices[within_threshold])
+    interpolator = _build_linear_interpolator(sample_points, sample_values)
+    predicted = interpolator(mesh_vertices[within_threshold])
+    mesh_activation[within_threshold] = predicted
     return mesh_activation
 
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')

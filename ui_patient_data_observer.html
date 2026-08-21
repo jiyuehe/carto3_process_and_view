@@ -137,25 +137,29 @@
             return payload;
         }
 
-        function computeColors(activation) {
+        function computeColors(activation, rangeOverride = null) {
             const validActivations = activation.filter(a => a !== 0 && Number.isFinite(a));
             if (validActivations.length === 0) {
                 return activation.map(() => 'rgba(80,80,80,0.1)');
             }
 
-            const minVal = Math.min(...validActivations);
-            const maxVal = Math.max(...validActivations);
-            const range = maxVal - minVal;
+            const range = rangeOverride || {
+                min: Math.min(...validActivations),
+                max: Math.max(...validActivations)
+            };
+            const minVal = range.min;
+            const maxVal = range.max;
+            const span = Math.max(maxVal - minVal, 1e-9);
 
             return activation.map(act => {
                 if (act === 0 || !Number.isFinite(act)) {
                     return 'rgba(80,80,80,0.1)';
                 }
 
-                const norm = range === 0 ? 0 : (act - minVal) / range;
+                const norm = (act - minVal) / span;
                 const hue = document.getElementById('toggleFullHue').checked ? norm : norm * (240.0 / 360.0);
-                const saturation = 1.0;
-                const value = 1.0;
+                const saturation = 0.9;
+                const value = 0.96;
 
                 const c = value * saturation;
                 const x = c * (1 - Math.abs(((hue * 6) % 2) - 1));
@@ -198,10 +202,14 @@
         }
 
         function getActivationColorscale() {
-            const samples = Array.from({ length: 25 }, (_, index) => index + 1);
-            return computeColors(samples).map((color, index) => [
-                index / (samples.length - 1), color
-            ]);
+            return [
+                [0.0, 'rgb(70, 70, 75)'],
+                [0.15, 'rgb(70, 120, 180)'],
+                [0.35, 'rgb(80, 180, 120)'],
+                [0.55, 'rgb(220, 180, 60)'],
+                [0.75, 'rgb(235, 110, 30)'],
+                [1.0, 'rgb(185, 20, 20)']
+            ];
         }
 
         function getMeshColorSettings(meshActivation, activationRange) {
@@ -215,14 +223,14 @@
                 };
             }
 
-            const span = activationRange.max - activationRange.min;
+            const span = Math.max(1e-9, activationRange.max - activationRange.min);
             const maskedValue = activationRange.min - span;
             const activationScale = getActivationColorscale();
             return {
                 intensity: meshActivation.map(value => value === null ? maskedValue : value),
                 colorscale: [
-                    [0, 'rgb(160,160,160)'],
-                    [0.499999, 'rgb(160,160,160)'],
+                    [0.0, 'rgb(160,160,160)'],
+                    [0.5, 'rgb(160,160,160)'],
                     ...activationScale.map(([position, color]) => [0.5 + 0.5 * position, color])
                 ],
                 cmin: maskedValue,
@@ -251,8 +259,8 @@
             update3DActivationColors();
         }
 
-        function splitElectrodesByActivation(activation, electrodePositions) {
-            const colors = computeColors(activation);
+        function splitElectrodesByActivation(activation, electrodePositions, range = null) {
+            const colors = computeColors(activation, range);
             const activePosns = [], activeColors = [], inactivePosns = [];
             const inactiveColors = [];
             electrodePositions.forEach((pos, index) => {
@@ -277,7 +285,7 @@
             const range = getGlobalActivationRange();
             const meshColors = getMeshColorSettings(meshActivation, range);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
-            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions);
+            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions, range);
 
             // update mesh coloring
             Plotly.restyle(plot, {
@@ -288,6 +296,12 @@
             }, [0]);
 
             // update current-segment active/inactive electrodes
+            Plotly.restyle(plot, {
+                x: [activePosns.map(p => p[0])],
+                y: [activePosns.map(p => p[1])],
+                z: [activePosns.map(p => p[2])],
+                'marker.color': [activeColors]
+            }, [2]);
             Plotly.restyle(plot, {
                 x: [inactivePosns.map(p => p[0])],
                 y: [inactivePosns.map(p => p[1])],
@@ -300,11 +314,6 @@
                 z: [otherPosns.map(p => p[2])],
                 'marker.color': [otherColors]
             }, [4]);
-            Plotly.restyle(plot, {
-                x: [inactivePosns.map(p => p[0])],
-                y: [inactivePosns.map(p => p[1])],
-                z: [inactivePosns.map(p => p[2])]
-            }, [3]);
 
             // update other-segments electrodes (all electrodes except current segment)
             const currLen = electrodePositions.length;
@@ -314,7 +323,7 @@
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
             const allActivations = getAllActivations();
-            const allColors = computeColors(allActivations);
+            const allColors = computeColors(allActivations, getGlobalActivationRange());
             const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
             Plotly.restyle(plot, {
                 x: [otherPosns.map(p => p[0])],
@@ -357,7 +366,6 @@
                 colorscale: meshColors.colorscale,
                 cmin: meshColors.cmin,
                 cmax: meshColors.cmax,
-                color: 'rgb(160,160,160)',
                 opacity: 1,
                 visible: showMesh,
                 showscale: false,
@@ -387,7 +395,7 @@
                 hoverinfo: 'none',
             };
 
-            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions);
+            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions, activationRange);
             const allElectrodePositions = getAllSegmentPositions();
 
             const electrodeActiveTrace = {
@@ -418,7 +426,7 @@
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
             const allActivations = getAllActivations();
-            const allColors = computeColors(allActivations);
+            const allColors = computeColors(allActivations, activationRange);
             const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
 
             const otherSegmentsTrace = {
@@ -520,18 +528,21 @@
 
                 uniInput.addEventListener('change', (e) => {
                     const electrodeId = parseInt(e.target.dataset.electrodeId);
-                    const newValue = parseInt(e.target.value);
-                    appData.activation_uni[currentSegmentIndex][electrodeId] = isNaN(newValue) ? 0 : newValue;
-                    update3DActivationColors();
+                    const rawValue = e.target.value;
+                    const newValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
+                    appData.activation_uni[currentSegmentIndex][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+
+                    const fullSegmentIds = Array.from({ length: getCurrentSegmentPositions().length }, (_, i) => i);
+                    document.getElementById('toggleEarliest').checked = false;
+                    document.getElementById('toggleLatest').checked = false;
+                    setSliderEnabled(true);
+
+                    render3DPlot(true);
+                    renderCombinedInputs(fullSegmentIds);
+                    renderElectrogram(fullSegmentIds);
+
                     if (document.getElementById('toggleInterpolateMesh').checked) {
                         refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
-                    }
-                    if (document.getElementById('toggleEarliest').checked) {
-                        showSortedElectrodes('earliest');
-                    } else if (document.getElementById('toggleLatest').checked) {
-                        showSortedElectrodes('latest');
-                    } else {
-                        renderElectrogram();
                     }
                 });
 
@@ -887,11 +898,16 @@
         document.getElementById('btnSave').addEventListener('click', async () => {
             if (!appData) return;
 
-            document.querySelectorAll('.activation-input').forEach(input => {
-                const electrodeId = parseInt(input.dataset.electrodeId);
-                const newValue = parseInt(input.value);
-                appData.activation_uni[currentSegmentIndex][electrodeId] = isNaN(newValue) ? 0 : newValue;
+            const fullSegmentLength = getCurrentSegmentPositions().length;
+            const segmentValues = Array.from({ length: fullSegmentLength }, (_, i) => {
+                const input = document.querySelector(`.activation-input[data-electrode-id="${i}"]`);
+                const rawValue = input ? input.value : appData.activation_uni[currentSegmentIndex][i];
+                const numericValue = rawValue === '' || rawValue === null || rawValue === undefined
+                    ? 0
+                    : Number.parseFloat(rawValue);
+                return Number.isFinite(numericValue) ? numericValue : 0;
             });
+            appData.activation_uni[currentSegmentIndex] = segmentValues;
 
             const saveButton = document.getElementById('btnSave');
             const saveProgress = document.getElementById('saveProgress');
