@@ -26,7 +26,7 @@ import webbrowser
 import threading
 import subprocess
 import time
-import configuration
+import utility
 
 # functions for projecting electrodes onto the mesh and interpolating activation times
 def _closest_points_on_triangles(point, triangles):
@@ -128,8 +128,8 @@ def project_electrodes_to_mesh(vertices, faces, electrodes):
 
 #%%
 # setting
-directory = configuration.directory_setup()
-name_prefix = configuration.map_name()
+directory = utility.configuration.directory_setup()
+name_prefix = utility.configuration.map_name()
 
 # load map data
 data = np.load(directory['data'] / f'{name_prefix}_clinical.npz', allow_pickle=True)

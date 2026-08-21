@@ -13,141 +13,17 @@
 # limitations under the License.
 
 #%%
-import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default = 'browser'
-
 import numpy as np
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 
-import configuration
-
-
-def create_consistent_template(signal, peak_indices, half_window, consistency_threshold=0.7):
-    """Create a median template only when aligned beats have consistent morphology."""
-    n_samples, n_channels = signal.shape
-    template_len = 2 * half_window + 1
-    zero_template = np.zeros((n_channels, template_len), dtype=float)
-
-    if len(peak_indices) == 0:
-        return zero_template, False
-
-    raw_beats = []
-    normalized_beats = []
-    for peak_idx in peak_indices:
-        start = max(0, peak_idx - half_window)
-        end = min(n_samples, peak_idx + half_window + 1)
-        beat = signal[start:end, :]
-
-        if beat.shape[0] < template_len:
-            padded = np.zeros((template_len, n_channels), dtype=float)
-            if peak_idx <= half_window:
-                missing_front = half_window - peak_idx
-                padded[missing_front:missing_front + beat.shape[0], :] = beat
-            else:
-                padded[:beat.shape[0], :] = beat
-            beat = padded
-
-        beat = beat - np.median(beat, axis=0, keepdims=True)
-        beat_norm = np.linalg.norm(beat)
-        if beat_norm == 0:
-            return zero_template, False
-        raw_beats.append(beat)
-        normalized_beats.append(beat / beat_norm)
-
-    if len(raw_beats) == 1:
-        return raw_beats[0].T, True
-
-    beat_stack = np.stack(normalized_beats, axis=0)
-    morphology = np.median(beat_stack, axis=0)
-    morphology_norm = np.linalg.norm(morphology)
-    if morphology_norm == 0:
-        return zero_template, False
-
-    morphology_reference = morphology / morphology_norm
-    morphology_correlations = np.sum(
-        beat_stack * morphology_reference,
-        axis=(1, 2),
-    )
-    if np.any(morphology_correlations < consistency_threshold):
-        return zero_template, False
-
-    return np.median(np.stack(raw_beats, axis=0), axis=0).T, True
-
-
-def estimate_far_field_half_window(
-    signal,
-    peak_indices,
-    minimum_half_window=40,
-    maximum_half_window=120,
-    edge_margin=10,
-):
-    """Estimate a common template half-width from the unipolar far-field envelope."""
-    if len(peak_indices) == 0:
-        return minimum_half_window
-
-    n_samples, n_channels = signal.shape
-    envelopes = []
-    initial_half_window = maximum_half_window
-
-    for peak_idx in peak_indices:
-        start = max(0, peak_idx - initial_half_window)
-        end = min(n_samples, peak_idx + initial_half_window + 1)
-        beat = signal[start:end, :]
-
-        if beat.shape[0] < 2 * initial_half_window + 1:
-            padded = np.zeros((2 * initial_half_window + 1, n_channels), dtype=float)
-            if peak_idx <= initial_half_window:
-                missing_front = initial_half_window - peak_idx
-                padded[missing_front:missing_front + beat.shape[0], :] = beat
-            else:
-                padded[:beat.shape[0], :] = beat
-            beat = padded
-
-        beat = beat - np.median(beat, axis=0, keepdims=True)
-        envelopes.append(np.percentile(np.abs(beat), 75, axis=1))
-
-    envelope = np.median(np.stack(envelopes, axis=0), axis=0)
-    edge_samples = max(5, initial_half_window // 5)
-    edge_values = np.concatenate((envelope[:edge_samples], envelope[-edge_samples:]))
-    baseline = np.median(edge_values)
-    noise = 1.4826 * np.median(np.abs(edge_values - baseline))
-    peak_excess = max(0.0, np.max(envelope) - baseline)
-    # Use a low tail threshold so lower-amplitude far-field activity is retained.
-    threshold = max(baseline + 2 * noise, baseline + 0.1 * peak_excess)
-
-    center = initial_half_window
-    if envelope[center] < threshold:
-        return minimum_half_window
-
-    def find_boundary(start, step):
-        index = start
-        below_threshold_count = 0
-        required_below_threshold = 5
-
-        while 0 < index < envelope.shape[0] - 1:
-            index += step
-            if envelope[index] < threshold:
-                below_threshold_count += 1
-                if below_threshold_count >= required_below_threshold:
-                    return index - step * (required_below_threshold - 1)
-            else:
-                below_threshold_count = 0
-
-        return index
-
-    left = find_boundary(center, -1)
-    right = find_boundary(center, 1)
-    estimated_half_window = max(center - left, right - center) + edge_margin
-    return int(np.clip(estimated_half_window, minimum_half_window, maximum_half_window))
-
+import utility
 
 #%%
 # setting
-half_window_size = 300//2 # number of time points before and after the 2000 ms mark
-directory = configuration.directory_setup()
-name_prefix = configuration.map_name()
+half_window_size_of_woi = 300//2 # number of time points before and after the 2000 ms mark
+directory = utility.configuration.directory_setup()
+name_prefix = utility.configuration.map_name()
 
 # load data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
@@ -157,121 +33,115 @@ data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
 mesh = {k: data[k] for k in data.files}
 
 #%%
-# recording segments
+# recording segments data
 catheter = carto['catheter'].item()
-# catheter['mapping_position_unipolar']
-# catheter['mapping_electrogram_unipolar']
-# catheter['mapping_name_unipolar']
-# catheter['mapping_position_bipolar']
-# catheter['mapping_electrogram_bipolar']
-# catheter['mapping_name_bipolar']
-# catheter['coronary_sinus_position_unipolar']
-# catheter['coronary_sinus_electrogram_unipolar']
-# catheter['coronary_sinus_name_unipolar']
-# catheter['coronary_sinus_position_bipolar']
-# catheter['coronary_sinus_electrogram_bipolar']
-# catheter['coronary_sinus_name_bipolar']
-# catheter['reference_electrogram']
-# catheter['reference_name']
-# catheter['surface_electrogram']
-# catheter['surface_name']
-# catheter['window_of_interest']
-
-N_segment = len(catheter['mapping_position_unipolar']) # number of recording segments
+mapping_position_unipolar = catheter['mapping_position_unipolar']
+mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
+surface_electrogram = catheter['surface_electrogram']
 mapping_name_unipolar = catheter['mapping_name_unipolar']
 mapping_name_unipolar = [name.replace("MCC_Dx_UniPolar_", "") for name in mapping_name_unipolar]
 surface_name = catheter['surface_name']
-for n in range(N_segment):
-    print(f'Segment {n+1}/{N_segment}')
 
-    mapping_position_unipolar = catheter['mapping_position_unipolar'][n]
-    mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar'][n]
-    surface_electrogram = catheter['surface_electrogram'][n]
+# loop through each recording segment
+n_segment = len(catheter['mapping_position_unipolar']) # number of recording segments
+for n in range(n_segment):
+    print(f'recording segment id {n} in [0, {n_segment-1}]')
 
-    # combine the 12 surface ECG leads into one signal for QRS detection
+    egm_unipolar = mapping_electrogram_unipolar[n]
+    egm_surface = surface_electrogram[n]
+
+    # QRS timing detection from the surface ECG
     # ------------------------------
-    surface_signal = np.abs(surface_electrogram) # take abs first so positive and negative deflections do not cancel each other
+    # combine the 12 surface ECG leads into one signal for QRS detection
+    surface_signal = np.abs(egm_surface) # take abs first so positive and negative deflections do not cancel each other
     surface_signal_sum = np.sum(surface_signal, axis=1)
 
-    # smooth slightly before peak detection to reduce noise and jitter
+    # smooth to reduce noise and jitter
     smooth_window = 30
     smooth_kernel = np.ones(smooth_window) / smooth_window
     surface_signal_smooth = np.convolve(surface_signal_sum, smooth_kernel, mode='same')
 
-    # QRS should be strong and well separated. 300 ms is a reasonable minimum beat interval.
-    min_qrs_spacing_samples = 300
-    qrs_half_window = 50  # samples before/after each detected QRS peak
-    template_len = 2 * qrs_half_window + 1
+    # find the QRS timings
+    min_qrs_spacing = 300 # ms
+    qrs_half_window = 50 # ms before/after each detected QRS peak
     qrs_threshold = np.percentile(surface_signal_smooth, 95)
-    qrs_peak_indices, _ = find_peaks(surface_signal_smooth, distance=min_qrs_spacing_samples, height=qrs_threshold)
-
-    _, surface_morphology_consistent = create_consistent_template(surface_electrogram,qrs_peak_indices,qrs_half_window)
-    if not surface_morphology_consistent:
-        qrs_peak_indices = np.array([], dtype=int)
+    qrs_peak_indices, _ = find_peaks(surface_signal_smooth, distance=min_qrs_spacing, height=qrs_threshold)
 
     debug_plot = 0
     if debug_plot: # show the surface ECG leads and detected QRS peaks
-        fig, axes = plt.subplots(13, 1, figsize=(12, 14), sharex=True)
+        # single axes: plot all surface ECG leads with vertical offsets
+        fig, ax = plt.subplots(figsize=(12, 8))
+        n_channel = egm_surface.shape[1]
 
-        # plot the 12 original ECG leads, stacked vertically
-        for lead_idx in range(surface_electrogram.shape[1]):
-            ax = axes[lead_idx]
-            ax.plot(surface_electrogram[:, lead_idx], color='blue', linewidth=1)
-            lead_name = surface_name[lead_idx]
-            ax.set_ylabel(lead_name)
-            ax.grid(False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+        # determine spacing based on signal ranges to separate traces visually
+        per_lead_range = np.ptp(egm_surface, axis=0)
+        max_range = np.nanmax(per_lead_range) if per_lead_range.size > 0 else 1.0
+        spacing = max(1.0, max_range * 1.5)
+        offsets = np.arange(n_channel) * spacing
 
-        # plot the combined signal at the bottom
-        ax_sum = axes[-1] # the last axes, which is the bottom plot
-        ax_sum.plot(surface_signal_sum, color='magenta', linewidth=1)
-        ax_sum.plot(surface_signal_smooth, color='blue', linewidth=1)
+        # plot each channel with an offset
+        for channel_idx in range(n_channel):
+            ax.plot(egm_surface[:, channel_idx] + offsets[channel_idx], color='blue', linewidth=1)
+
+        # plot the combined (summed) signal scaled and placed below the leads
+        sample_axis = np.arange(surface_signal_sum.shape[0])
+        if np.ptp(surface_signal_sum) > 0:
+            surface_signal_scaled = surface_signal_sum * (max_range / np.ptp(surface_signal_sum)) - spacing
+        else:
+            surface_signal_scaled = surface_signal_sum - spacing
+
+        ax.plot(sample_axis, surface_signal_scaled, color='magenta', linewidth=1)
+        ax.plot(sample_axis, np.convolve(surface_signal_sum, smooth_kernel, mode='same') * (max_range / np.ptp(surface_signal_sum)) - spacing, color='blue', linewidth=1)
         if len(qrs_peak_indices) > 0:
-            ax_sum.scatter(qrs_peak_indices, surface_signal_smooth[qrs_peak_indices], color='red', s=20, zorder=5)
-        ax_sum.set_ylabel('Sum')
-        ax_sum.set_xlabel('time (ms)')
+            ax.scatter(qrs_peak_indices, surface_signal_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
 
-        fig.suptitle(f'Surface ECGs and QRS detection (segment {n+1}/{N_segment})', y=1.02)
+        ax.set_xlabel('Time (ms)')
+        # show channel names as y-tick labels at each trace offset
+        ax.set_yticks(offsets)
+        ax.set_yticklabels(surface_name, fontsize=8)
+        ax.set_title(f'Surface ECGs and QRS detection (segment {n+1}/{n_segment})')
+        ax.grid(False)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
         plt.tight_layout()
-        plt.show()
 
     # create QRS morphology template for each of the unipolar electrograms
     # ------------------------------
-    qrs_half_window = estimate_far_field_half_window(mapping_electrogram_unipolar,qrs_peak_indices) # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
+    qrs_half_window = utility.signal_processing.estimate_far_field_half_window(egm_unipolar,qrs_peak_indices) # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
     template_len = 2 * qrs_half_window + 1
 
-    qrs_template_unipolar, _ = create_consistent_template(mapping_electrogram_unipolar,qrs_peak_indices,qrs_half_window)
+    qrs_template_unipolar, _ = utility.signal_processing.create_consistent_template(egm_unipolar,qrs_peak_indices,qrs_half_window)
 
     # subtract the QRS template from each unipolar electrogram to remove the QRS component
     # ------------------------------
-    qrs_subtracted = mapping_electrogram_unipolar.copy()
+    qrs_subtracted = egm_unipolar.copy()
     qrs_taper_size = 15
     qrs_subtraction_window = np.ones(template_len, dtype=float)
     qrs_taper = 0.5 * (1 - np.cos(np.pi * np.arange(qrs_taper_size) / qrs_taper_size))
     qrs_subtraction_window[:qrs_taper_size] = qrs_taper
     qrs_subtraction_window[-qrs_taper_size:] = qrs_taper[::-1]
 
-    for channel_idx in range(mapping_electrogram_unipolar.shape[1]):
+    for channel_idx in range(egm_unipolar.shape[1]):
         for peak_idx in qrs_peak_indices:
             start = peak_idx - qrs_half_window
             end = peak_idx + qrs_half_window + 1
             seg_start = max(0, start)
-            seg_end = min(mapping_electrogram_unipolar.shape[0], end)
+            seg_end = min(egm_unipolar.shape[0], end)
 
-            signal_segment = mapping_electrogram_unipolar[seg_start:seg_end, channel_idx]
+            signal_segment = egm_unipolar[seg_start:seg_end, channel_idx]
 
             if peak_idx <= qrs_half_window:
                 missing_front = qrs_half_window - peak_idx
                 template_segment = qrs_template_unipolar[channel_idx, missing_front:missing_front + signal_segment.shape[0]]
-            elif peak_idx + qrs_half_window + 1 > mapping_electrogram_unipolar.shape[0]:
+            elif peak_idx + qrs_half_window + 1 > egm_unipolar.shape[0]:
                 template_segment = qrs_template_unipolar[channel_idx, :signal_segment.shape[0]]
             else:
                 template_segment = qrs_template_unipolar[channel_idx, :]
 
             if peak_idx <= qrs_half_window:
                 subtraction_window = qrs_subtraction_window[missing_front:missing_front + signal_segment.shape[0]]
-            elif peak_idx + qrs_half_window + 1 > mapping_electrogram_unipolar.shape[0]:
+            elif peak_idx + qrs_half_window + 1 > egm_unipolar.shape[0]:
                 subtraction_window = qrs_subtraction_window[:signal_segment.shape[0]]
             else:
                 subtraction_window = qrs_subtraction_window
@@ -284,7 +154,7 @@ for n in range(N_segment):
 
     debug_plot = 0
     if debug_plot: # plot the original, QRS template, and QRS-subtracted electrograms
-        n_channels = mapping_electrogram_unipolar.shape[1]
+        n_channels = egm_unipolar.shape[1]
         template_x = np.arange(-qrs_half_window, qrs_half_window + 1) # x-axis for the QRS template
 
         fig = plt.figure(figsize=(20, 15))
@@ -301,7 +171,7 @@ for n in range(N_segment):
                 ax_left.axvline(peak_idx, color='red', linewidth=1.0, clip_on=True) # the vertical line indicating QRS timing
 
         for channel_idx in range(n_channels):
-            signal_trace = mapping_electrogram_unipolar[:, channel_idx] + y_offset[channel_idx]
+            signal_trace = egm_unipolar[:, channel_idx] + y_offset[channel_idx]
             ax_left.plot(signal_trace, color='blue', linewidth=1.0)
 
         for channel_idx in range(qrs_template_unipolar.shape[0]):
@@ -319,7 +189,7 @@ for n in range(N_segment):
         # find out the global min and max across all three subplots to set a shared y-axis range
         stacked_trace_values = []
         for channel_idx in range(n_channels):
-            stacked_trace_values.append(mapping_electrogram_unipolar[:, channel_idx] + y_offset[channel_idx])
+            stacked_trace_values.append(egm_unipolar[:, channel_idx] + y_offset[channel_idx])
             stacked_trace_values.append(qrs_subtracted[:, channel_idx] + y_offset[channel_idx])
             stacked_trace_values.append(qrs_template_unipolar[channel_idx, :] + channel_idx * y_spacing)
         all_min = min(np.min(v) for v in stacked_trace_values)
@@ -441,7 +311,7 @@ for n in range(N_segment):
     if debug_plot: # plot the before and after QRS-subtracted unipolar electrograms and the detected activation times
         sample_axis = np.arange(n_samples)
         trace_range = max(
-            np.nanmax(np.ptp(mapping_electrogram_unipolar, axis=0)),
+            np.nanmax(np.ptp(egm_unipolar, axis=0)),
             np.nanmax(np.ptp(qrs_subtracted, axis=0)),
         )
         trace_spacing = max(1.0, trace_range * 1.2)
@@ -456,7 +326,7 @@ for n in range(N_segment):
             offset = trace_offsets[channel_idx]
             original_axis.plot(
                 sample_axis,
-                mapping_electrogram_unipolar[:, channel_idx] + offset,
+                egm_unipolar[:, channel_idx] + offset,
                 color='blue',
                 linewidth=0.7,
             )
@@ -488,18 +358,27 @@ for n in range(N_segment):
         original_axis.set_xlim(sample_axis[0], sample_axis[-1])
 
         # set the y-axis limits
-        top_unipolar_egm = mapping_electrogram_unipolar[:, -1] + trace_offsets[-1]
+        top_unipolar_egm = egm_unipolar[:, -1] + trace_offsets[-1]
         y_min = np.nanmin(surface_signal_scaled)
         y_max = np.nanmax(top_unipolar_egm)
         original_axis.set_ylim(y_min, y_max)
         subtracted_axis.set_ylim(y_min, y_max)
 
         fig.tight_layout()
+        plt.show()
 
-        fig_path = directory['result'] / f'activation_{n}.png'
-        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-        plt.close()
+        # fig_path = directory['result'] / f'activation_{n}.png'
+        # plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        # plt.close()
 
+#%%
+    # refine activation time detections
+    # ------------------------------
+    # for each unipolar electrogram, create morphology template from the detected activation times
+    qrs_half_window = utility.signal_processing.estimate_far_field_half_window(egm_unipolar,activation_times_unipolar) # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
+    template_len = 2 * qrs_half_window + 1
+
+    qrs_template_unipolar, _ = utility.signal_processing.create_consistent_template(egm_unipolar,activation_times_unipolar,qrs_half_window)
 
 
 #%%
@@ -560,8 +439,8 @@ for n in range(N_segment):
 
 # #%%
 # # mask the electrograms to the window of interest
-# t_start = 2000-1 - half_window_size # window of interest start time index
-# t_end = 2000-1 + half_window_size # window of interest end time index
+# t_start = 2000-1 - half_window_size_of_woi # window of interest start time index
+# t_end = 2000-1 + half_window_size_of_woi # window of interest end time index
 
 # taper_length = 50 # number of time points for gradual onset/offset at the window edges
 # taper_sigma = taper_length / 3 # sigma so the ramp reaches ~1% at the edge
