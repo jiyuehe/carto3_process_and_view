@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 # estimate a common template half-width from the far-field envelope
 def estimate_far_field_half_window(signal,peak_indices):
-    minimum_half_window = 30
+    minimum_half_window = 50
     maximum_half_window = 120
 
     if peak_indices is None:
@@ -138,14 +138,11 @@ def estimate_far_field_half_window(signal,peak_indices):
     return half_window
 
 # create a median template only when aligned beats have consistent morphology
-def create_consistent_template(signal, peak_indices, half_window):
-    consistency_threshold = 0.7
-
+def create_consistent_template(signal, peak_indices, half_window, consistency_threshold = 0.6):
     n_samples, n_channels = signal.shape
     template_len = 2 * half_window + 1
-    zero_template = np.zeros((n_channels, template_len), dtype=float)
+    template = np.zeros((n_channels, template_len), dtype=float)
 
-    template = zero_template
     for ch in range(n_channels):
         ch_peak_indices = np.asarray(peak_indices[ch], dtype=int)
         raw_beats = []
@@ -164,29 +161,38 @@ def create_consistent_template(signal, peak_indices, half_window):
                 beat = padded
 
             beat = beat - np.median(beat)
-            beat_norm = np.linalg.norm(beat)
 
             raw_beats.append(beat)
 
-
-        if len(raw_beats) == 1:
-            template[ch, :] = raw_beats[0]
+        # if no beats were collected for this channel, leave the template as zeros
+        if len(raw_beats) == 0:
+            template[ch, :] = 0.0
             continue
 
         beat_stack = np.stack(raw_beats, axis=0)
-        morphology = np.median(beat_stack, axis=0)
-        morphology_norm = np.linalg.norm(morphology)
-        if morphology_norm == 0:
-            return zero_template, False
+        morphology_median = np.median(beat_stack, axis=0)
 
-        morphology_reference = morphology / morphology_norm
-        morphology_correlations = np.sum(
-            beat_stack * morphology_reference,
-            axis=1,
-        )
-        if np.any(morphology_correlations < consistency_threshold):
-            return zero_template, False
+        # compute the correlation of each beat with the median morphology
+        beat_correlations = []
+        for beat in beat_stack:
+            beat_centered = beat - np.median(beat)
+            median_centered = morphology_median - np.median(morphology_median)
+            denom = np.linalg.norm(beat_centered) * np.linalg.norm(median_centered)
+            if denom > 0:
+                corr = float(np.dot(beat_centered, median_centered) / denom)
+            else:
+                corr = 0.0
+            beat_correlations.append(corr)
 
-        template[ch, :] = np.median(beat_stack, axis=0)
+        # check which beats are consistent with the median morphology
+        beat_correlations = np.asarray(beat_correlations, dtype=float)
+        beat_correlations = np.nan_to_num(beat_correlations, nan=0.0)
+        beat_correlations_mean = np.mean(beat_correlations)
+
+        # keep a template for each channel instead of overwriting a single shared variable
+        if beat_correlations_mean >= consistency_threshold:
+            template[ch, :] = morphology_median
+        else:
+            template[ch, :] = 0.0
 
     return template

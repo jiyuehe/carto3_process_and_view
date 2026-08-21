@@ -44,7 +44,7 @@ surface_name = catheter['surface_name']
 
 # loop through each recording segment
 n_segment = len(catheter['mapping_position_unipolar']) # number of recording segments
-for n in [0]: #range(n_segment):
+for n in range(n_segment): # range(n_segment) or [some segment indices for debugging]
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
     egm_unipolar = mapping_electrogram_unipolar[n]
@@ -108,7 +108,7 @@ for n in [0]: #range(n_segment):
     peak_indices = qrs_peak_indices_per_channel
     qrs_half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
     template_len = 2 * qrs_half_window + 1
-#%%
+
     half_window = qrs_half_window
     qrs_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window)
 
@@ -288,8 +288,8 @@ for n in [0]: #range(n_segment):
             dvdt_baseline = np.median(finite_dvdt)
             dvdt_noise = 1.4826 * np.median(np.abs(finite_dvdt - dvdt_baseline))
             peak_height_threshold = max(
-                dvdt_baseline + 4 * dvdt_noise,
-                0.05 * np.max(finite_dvdt),
+                dvdt_baseline + 2 * dvdt_noise,
+                0.02 * np.max(finite_dvdt),
             )
             peak_prominence_threshold = max(2 * dvdt_noise, 0.0)
             activation_peaks, _ = find_peaks(
@@ -366,21 +366,140 @@ for n in [0]: #range(n_segment):
         fig.tight_layout()
         plt.show()
 
-        # fig_path = directory['result'] / f'activation_{n}.png'
-        # plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-        # plt.close()
-
-#%%
     # refine activation time detections
     # ------------------------------
-    # for each unipolar electrogram, create morphology template from the detected activation times
-    qrs_half_window = utility.signal_processing.estimate_far_field_half_window(egm_unipolar,activation_times_unipolar) # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
-    template_len = 2 * qrs_half_window + 1
+    # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
+    signal = egm_unipolar
+    peak_indices = activation_times_unipolar
+    half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
+    template_len = 2 * half_window + 1
 
-    qrs_template_unipolar, _ = utility.signal_processing.create_consistent_template(egm_unipolar,activation_times_unipolar,qrs_half_window)
+    # for each unipolar electrogram, create morphology template from the detected activation times
+    activation_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window,consistency_threshold=0.4)
+
+    # for each unipolar electrogram channel, crosscorrelate the activation template with the QRS-subtracted unipolar electrogram to refine the activation time detections
+    activation_times_unipolar_refined = [np.array([0], dtype=int) for _ in range(n_channels)]
+    for channel_idx in range(n_channels):
+        electrogram = qrs_subtracted[:, channel_idx].astype(float)
+        template = activation_template_unipolar[channel_idx, :].astype(float)
+
+        template_centered = template - np.median(template)
+        electrogram_centered = electrogram - np.median(electrogram)
+
+        # normalize the cross-correlation to find the lag that best aligns the template with this channel
+        cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
+
+        # find out peak threshold
+        correlation_baseline = np.median(cross_correlation)
+        correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
+        peak_height_threshold = max(
+            correlation_baseline + 2 * correlation_noise,
+            0.02 * np.max(cross_correlation),
+        )
+        peak_prominence_threshold = max(2 * correlation_noise, 0.0)
+
+        correlation_peaks, _ = find_peaks(
+            np.nan_to_num(cross_correlation, nan=-np.inf),
+            distance=minimum_activation_distance,
+            height=peak_height_threshold,
+            prominence=peak_prominence_threshold,
+        )
+
+        # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
+        correlation_peaks = correlation_peaks[
+            (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
+        ]
+
+        if len(correlation_peaks) != 0:
+            activation_times_unipolar_refined[channel_idx] = correlation_peaks
+
+    debug_plot = 0
+    if debug_plot: # plot the original electrograms, activation template, and refined activation times
+        sample_axis = np.arange(n_samples)
+        trace_range = max(
+            np.nanmax(np.ptp(egm_unipolar, axis=0)),
+            np.nanmax(np.ptp(qrs_subtracted, axis=0)),
+        )
+        trace_spacing = max(1.0, trace_range * 1.05)
+        trace_offsets = np.arange(n_channels) * trace_spacing
+
+        template_axis_offset = np.arange(n_channels) * trace_spacing
+        template_x = np.arange(-half_window, half_window + 1)
+        surface_signal_scaled = surface_signal_sum * (trace_range / np.ptp(surface_signal_sum)) - trace_spacing
+
+        fig, axes = plt.subplots(1, 3, figsize=(16, max(6, 0.25 * n_channels)), gridspec_kw={'width_ratios': [30, 1, 30]})
+        original_axis, template_axis, subtracted_axis = axes
+
+        for channel_idx in range(n_channels):
+            offset = trace_offsets[channel_idx]
+            original_axis.plot(
+                sample_axis,
+                egm_unipolar[:, channel_idx] + offset,
+                color='blue',
+                linewidth=0.7,
+            )
+            subtracted_axis.plot(
+                sample_axis,
+                qrs_subtracted[:, channel_idx] + offset,
+                color='blue',
+                linewidth=0.7,
+            )
+            activation_peaks = activation_times_unipolar_refined[channel_idx]
+            if not np.array_equal(activation_peaks, [0]):
+                subtracted_axis.scatter(
+                    activation_peaks,
+                    qrs_subtracted[activation_peaks, channel_idx] + offset,
+                    color='red',
+                    s=12,
+                    zorder=3,
+                )
+
+            template = activation_template_unipolar[channel_idx, :]
+            template_axis.plot(
+                template_x,
+                template + template_axis_offset[channel_idx],
+                color='blue',
+                linewidth=1.0,
+            )
+
+        surface_axis = np.arange(surface_signal_sum.shape[0])
+        original_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+        subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+
+        original_axis.set_title('Original unipolar electrograms')
+        template_axis.set_title('Activation template')
+        subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
+        original_axis.set_xlabel('time (ms)')
+        template_axis.set_xlabel('lag (samples)')
+        subtracted_axis.set_xlabel('time (ms)')
+        original_axis.set_yticks([])
+        template_axis.set_yticks([])
+        subtracted_axis.set_yticks([])
+        original_axis.set_xlim(sample_axis[0], sample_axis[-1])
+        template_axis.set_xlim(template_x[0], template_x[-1])
+
+        # set the y-axis limits
+        top_unipolar_egm = egm_unipolar[:, -1] + trace_offsets[-1]
+        y_min = np.nanmin(surface_signal_scaled)
+        y_max = np.nanmax(top_unipolar_egm)
+        original_axis.set_ylim(y_min, y_max)
+        subtracted_axis.set_ylim(y_min, y_max)
+        template_axis.set_ylim(y_min, y_max)
+
+        fig.tight_layout()
+
+        fig_path = directory['result'] / f'activation_refined_{n}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close()
+
+
 
 
 #%%
+
+
+
+
 
 
 
@@ -390,141 +509,10 @@ for n in [0]: #range(n_segment):
 # electrode = carto['electrode']
 # electrode_positions_all = carto['electrode_positions']
 
-# electrode_positions = []
-# electrogram_unipolar_original = []
-# electrogram_bipolar_original = []
-# electrogram_reference_original = []
-# reference_channel_name = []
-# for e_id in range(len(electrode)):
-#     electrode_name = electrode[e_id]['unipolar_name']
-
-#     if 'mapping_' in electrode_name:
-#         # grab full-length electrograms
-#         uni = electrode[e_id]['unipolar']
-#         bi = electrode[e_id]['bipolar']
-
-#         if uni is not None and bi is not None:
-#             electrode_positions.append(electrode_positions_all[e_id, :])
-
-#             # ref = electrode[e_id]['reference']
-#             ref = electrode[e_id]['surface'][:,1] # surface lead V1
-
-#             electrogram_unipolar_original.append(uni)
-#             electrogram_bipolar_original.append(bi)
-#             electrogram_reference_original.append(ref)
-
-#             reference_channel_name.append(carto['electrode_point_info'][e_id]['reference_channel_name'])
-#             # reference_channel_name.append('V1')
-
-# electrode_positions = np.array(electrode_positions)
-# electrogram_unipolar_original = np.array(electrogram_unipolar_original)
-# electrogram_bipolar_original = np.array(electrogram_bipolar_original)
-# electrogram_reference_original = np.array(electrogram_reference_original)
-
-# debug_plot = 0
-# if debug_plot == 1:
-#     # plot electrograms of an electrode
-#     e_id = 350
-#     plt.figure(figsize=(12, 6))
-#     plt.plot(electrogram_reference_original[e_id, :], color = 'cyan', label='Reference Electrogram (original)')
-#     plt.plot(electrogram_unipolar_original[e_id, :], color = 'blue', label='Unipolar Electrogram (original)')
-#     plt.plot(electrogram_bipolar_original[e_id, :], color = 'magenta', label='Bipolar Electrogram (original)')
-#     plt.title('Original. Blue: unipolar, Magenta: bipolar, Cyan: reference')
-#     plt.xlabel('ms')
-#     plt.ylabel('mV')
-#     plt.legend()
-#     plt.tight_layout()
-#     plt.show()
-
 # #%%
 # # mask the electrograms to the window of interest
 # t_start = 2000-1 - half_window_size_of_woi # window of interest start time index
 # t_end = 2000-1 + half_window_size_of_woi # window of interest end time index
-
-# taper_length = 50 # number of time points for gradual onset/offset at the window edges
-# taper_sigma = taper_length / 3 # sigma so the ramp reaches ~1% at the edge
-# taper = np.exp(-0.5 * ((np.arange(taper_length) - taper_length) / taper_sigma) ** 2) # Gaussian ramp from ~0 to 1
-# woi_window = np.zeros(electrogram_unipolar_original.shape[1])
-# woi_window[t_start:t_end] = 1.0
-# woi_window[t_start:t_start + taper_length] = taper
-# woi_window[t_end - taper_length:t_end] = taper[::-1]
-
-# electrogram_unipolar_masked = electrogram_unipolar_original * woi_window
-# electrogram_bipolar_masked = electrogram_bipolar_original * woi_window
-
-# # find QRS timing from the reference electrogram
-# s = np.abs(electrogram_reference_original)
-# s[:, :t_start] = 0
-# s[:, t_end:] = 0
-# qrs_time = [find_peaks(s[i, :], height=0.7*np.max(s[i, :]), distance=50)[0][0] for i in range(s.shape[0])] # find peaks in the derivative of each reference electrode
-
-# # mask out the QRS in the electrograms via inverse flat-top Gaussian window
-# qrs_taper_size = 50 # number of time points for the Gaussian ramp on each side
-# qrs_flat_size = 50  # number of time points held at zero in the flat middle region
-# qrs_taper_sigma = qrs_taper_size / 3 # sigma so the ramp reaches ~1% at the edge
-# n_electrodes = electrogram_unipolar_masked.shape[0]
-# n_sig = electrogram_unipolar_masked.shape[1]
-# qrs_taper_up = np.exp(-0.5 * ((np.arange(qrs_taper_size) - qrs_taper_size) / qrs_taper_sigma) ** 2) # ~0 -> 1
-# electrogram_unipolar = np.zeros_like(electrogram_unipolar_masked)
-# # electrogram_bipolar = np.zeros_like(electrogram_bipolar_masked)
-# for i in range(n_electrodes):
-#     qrs_bump = np.zeros(n_sig)
-#     qrs_start = qrs_time[i] - qrs_flat_size // 2 - qrs_taper_size
-#     qrs_flat_start = qrs_start + qrs_taper_size
-#     qrs_flat_end = qrs_flat_start + qrs_flat_size
-#     qrs_end = qrs_flat_end + qrs_taper_size
-#     qrs_bump[qrs_start:qrs_flat_start] = qrs_taper_up
-#     qrs_bump[qrs_flat_start:qrs_flat_end] = 1.0
-#     qrs_bump[qrs_flat_end:qrs_end] = qrs_taper_up[::-1]                                # 1 -> ~0
-#     qrs_window = 1 - qrs_bump # inverse: 1 outside QRS, flat zero at centre, smooth Gaussian tapers
-#     electrogram_unipolar[i, :] = electrogram_unipolar_masked[i, :] * qrs_window
-#     # electrogram_bipolar[i, :] = electrogram_bipolar_masked[i, :] * qrs_window
-# electrogram_bipolar = electrogram_bipolar_masked
-
-# debug_plot = 0
-# if debug_plot == 1:
-#     e_id = 350
-
-#     plt.figure(figsize=(12, 10))
-
-#     plt.subplot(5, 1, 1)
-#     plt.plot(electrogram_reference_original[e_id, :], color = 'cyan', label='Reference Electrogram (original)')
-#     plt.plot(electrogram_unipolar_original[e_id, :], color = 'blue', label='Unipolar Electrogram (original)')
-#     plt.plot(electrogram_bipolar_original[e_id, :], color = 'magenta', label='Bipolar Electrogram (original)')
-#     plt.title('Original. Blue: unipolar, Magenta: bipolar, Cyan: reference')
-#     plt.xlabel('ms')
-#     plt.ylabel('mV')
-
-#     plt.subplot(5, 1, 2)
-#     plt.plot(woi_window, color = 'blue')
-#     plt.title('Window of Interest')
-#     plt.xlabel('Time Points')
-#     plt.ylabel('Weight')
-
-#     plt.subplot(5, 1, 3)
-#     plt.plot(electrogram_unipolar_masked[e_id, :], color = 'blue', label='Unipolar Electro gram (masked)')
-#     plt.plot(electrogram_bipolar_masked[e_id, :], color = 'magenta', label='Bipolar Electrogram (masked)')
-#     plt.axvline(qrs_time[e_id], color='red', linestyle='--', label='QRS Timing')
-#     plt.title('Masked to window of interest. Blue: unipolar, Magenta: bipolar, Red dashed line: QRS timing')
-#     plt.xlabel('ms')
-#     plt.ylabel('mV')
-
-#     plt.subplot(5, 1, 4)
-#     plt.plot(qrs_window, color = 'blue')
-#     plt.title('Window for QRS Masking')
-#     plt.xlabel('Time Points')
-#     plt.ylabel('Weight')
-
-#     plt.subplot(5, 1, 5)
-#     plt.plot(electrogram_unipolar[e_id, :], color = 'blue', label='Unipolar Electrogram (masked)')
-#     plt.plot(electrogram_bipolar[e_id, :], color = 'magenta', label='Bipolar Electrogram (masked)')
-#     plt.title('QRS removed. Blue: unipolar, Magenta: bipolar')
-#     plt.xlabel('ms')
-#     plt.ylabel('mV')
-
-#     plt.tight_layout()
-#     plt.savefig(directory['result'] / f'{name_prefix}_QRS_removal.png', dpi=300) # save as png
-#     plt.close()
 
 # #%%
 # clinical_electrogram_unipolar_original = electrogram_unipolar_original
@@ -532,74 +520,6 @@ for n in [0]: #range(n_segment):
 # clinical_electrogram_unipolar_refined = electrogram_unipolar_original
 # clinical_electrogram_bipolar_refined = electrogram_bipolar_original
 # clinical_electrogram_reference = electrogram_reference_original
-
-# #%%
-# # sometimes the electrogram has high frequency noise such as 60 Hz noise from power supply etc, apply a moving average smoothing to remove them
-# window_size = 5 # number of time points in the moving average window
-# clinical_electrogram_unipolar_refined = np.convolve(clinical_electrogram_unipolar_refined.flatten(), np.ones(window_size)/window_size, mode='same').reshape(clinical_electrogram_unipolar_refined.shape)
-# clinical_electrogram_bipolar_refined = np.convolve(clinical_electrogram_bipolar_refined.flatten(), np.ones(window_size)/window_size, mode='same').reshape(clinical_electrogram_bipolar_refined.shape)
-
-# # activation time detection on bipolar electrogram
-# signal = clinical_electrogram_bipolar_refined
-# absolute_dvdt = np.abs(np.diff(signal, axis=1, prepend=signal[:, [0]]))
-# absolute_dvdt_woi = absolute_dvdt.copy()
-# for i in range(signal.shape[0]):
-#     absolute_dvdt_woi[i, :t_start] = 0
-#     absolute_dvdt_woi[i, t_end:] = 0
-
-# activation = np.zeros(absolute_dvdt_woi.shape[0], dtype=int)
-# for i in range(absolute_dvdt_woi.shape[0]):
-#     peaks, props = find_peaks(absolute_dvdt_woi[i, :], height=0.3*np.max(absolute_dvdt_woi[i, :]), distance=20)
-
-#     if len(peaks) == 0:
-#         activation[i] = 0
-#     elif len(peaks) == 1:
-#         activation[i] = peaks[0]
-#     else:
-#         heights = props['peak_heights']
-#         top2_order = np.argsort(heights)[-2:]  # indices into peaks/heights of 2 largest
-#         top2_peaks = peaks[top2_order]
-#         top2_heights = heights[top2_order]
-
-#         # sort descending by height
-#         desc = np.argsort(top2_heights)[::-1]
-#         top2_peaks = top2_peaks[desc]
-#         top2_heights = top2_heights[desc]
-
-#         # if 2nd largest is not too smaller than the largest, pick the earlier (smaller index) peak
-#         if top2_heights[1] >= 0.3 * top2_heights[0]:
-#             activation[i] = min(top2_peaks)
-#         else:
-#             activation[i] = top2_peaks[0]
-
-# debug_plot = 0
-# if debug_plot == 1:
-#     e_id = 350
-
-#     plt.figure(figsize=(12, 6))
-#     plt.plot(clinical_electrogram_bipolar_refined[e_id, :], color='blue', label='Bipolar Electrogram')
-#     plt.plot(absolute_dvdt_woi[e_id, :], color='orange', label='absolute dV/dt')
-#     plt.scatter(activation[e_id], absolute_dvdt_woi[e_id, activation[e_id]], color='red', label='Detected Activation Time')
-#     plt.title('Activation Time Detection from Bipolar Electrogram')
-#     plt.xlabel('ms')
-#     plt.ylabel('mV / mV/ms')
-#     plt.legend()
-#     plt.tight_layout()
-#     plt.show()
-
-# # remove activation time if it's the 1st or last point
-# for i in range(signal.shape[0]):
-#     if activation[i] == t_start or activation[i] == t_end:
-#         activation[i] = 0
-
-# # remove activation time if the signal is very small
-# do_flag = 1
-# if do_flag == 1:
-#     for e_id in range(signal.shape[0]):
-#         if np.max(clinical_electrogram_unipolar_refined[e_id, t_start:t_end]) - np.min(clinical_electrogram_unipolar_refined[e_id, t_start:t_end]) < 0.3: # > 1 mV is normal. < 0.5 mV is considered dense scar for unipolar
-#             activation[e_id] = 0
-#         if np.max(clinical_electrogram_bipolar_refined[e_id, t_start:t_end]) - np.min(clinical_electrogram_bipolar_refined[e_id, t_start:t_end]) < 0.2: # > 0.5 mV is normal. < 0.2 mV is considered dense scar for bipolar
-#             activation[e_id] = 0
 
 # #%% 
 # # save data
