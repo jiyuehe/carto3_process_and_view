@@ -176,6 +176,48 @@ egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object)
 activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', np.zeros((segment_count, segment_electrode_count), dtype=object)), dtype=object)
 activation_bi = np.asarray(catheter.get('mapping_electrogram_bipolar_activation_within_woi', activation_uni), dtype=object)
 
+def _flatten_segment_positions(segment_positions):
+    out = []
+    for seg in segment_positions:
+        try:
+            arr = np.asarray(seg, dtype=float)
+        except Exception:
+            try:
+                for elem in seg:
+                    e = np.asarray(elem, dtype=float)
+                    if e.size == 3:
+                        out.append(e.reshape(3,))
+            except Exception:
+                continue
+        else:
+            if arr.ndim == 1:
+                if arr.size == 3:
+                    out.append(arr.reshape(3,))
+                else:
+                    try:
+                        for elem in seg:
+                            e = np.asarray(elem, dtype=float)
+                            if e.size == 3:
+                                out.append(e.reshape(3,))
+                    except Exception:
+                        continue
+            else:
+                try:
+                    if arr.shape[-1] == 3:
+                        rows = arr.reshape(-1, 3)
+                        for r in rows:
+                            out.append(r)
+                    else:
+                        for row in arr:
+                            e = np.asarray(row, dtype=float)
+                            if e.size == 3:
+                                out.append(e.reshape(3,))
+                except Exception:
+                    continue
+    if len(out) == 0:
+        return np.empty((0, 3), dtype=float)
+    return np.vstack(out)
+
 data_store = {
     'directory': directory,
     'name_prefix': name_prefix,
@@ -187,7 +229,10 @@ data_store = {
     'segment_positions': segment_positions,
     'segment_count': segment_count,
     'segment_electrode_count': segment_electrode_count,
+    # keep first-segment electrode positions for legacy clients
     'electrode_positions': segment_positions[0] if segment_count else np.empty((0, 3), dtype=float),
+    # flattened positions for all electrodes across all segments
+    'electrode_positions_all': _flatten_segment_positions(segment_positions),
     'egm_uni_original': egm_uni_original,
     'egm_bi_original': egm_bi_original,
     'egm_ref': egm_ref,
@@ -204,21 +249,21 @@ try:
     cached = np.load(interpolation_cache)
     if (int(cached['algorithm_version']) != 2 or
             cached['mesh_shape'].tolist() != list(data_store['mesh_vertex'].shape) or
-            cached['electrode_shape'].tolist() != list(data_store['electrode_positions'].shape)):
+            cached['electrode_shape'].tolist() != list(data_store['electrode_positions_all'].shape)):
         raise ValueError('stale interpolation cache')
     projected_electrodes = cached['projected_electrodes']
     projection_faces = cached['projection_faces']
 except (OSError, KeyError, ValueError):
     projected_electrodes, projection_faces = (
         project_electrodes_to_mesh(
-            data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions']
+            data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions_all']
         )
     )
     np.savez_compressed(
         interpolation_cache,
         algorithm_version=2,
         mesh_shape=data_store['mesh_vertex'].shape,
-        electrode_shape=data_store['electrode_positions'].shape,
+        electrode_shape=data_store['electrode_positions_all'].shape,
         projected_electrodes=projected_electrodes,
         projection_faces=projection_faces,
     )
@@ -227,7 +272,6 @@ data_store.update({
     'projected_electrodes': projected_electrodes,
     'projection_faces': projection_faces,
 })
-
 
 INTERPOLATION_DISTANCE_MM = 10.0
 
@@ -330,17 +374,33 @@ def get_electrograms():
 @app.route('/api/interpolate', methods=['POST'])
 def interpolate_activation():
     payload = request.get_json(silent=True) or {}
-    segment_id = int(payload.get('segment_id', 0))
-    activation = np.asarray(payload.get('activation_uni', []), dtype=np.float64)
+    # Accept either a flattened per-electrode activation array ('activation_all')
+    # or a per-segment activation ('activation_uni') together with 'segment_id'.
+    if 'activation_all' in payload:
+        activation_all = np.asarray(payload.get('activation_all', []), dtype=np.float64)
+        if activation_all.ndim != 1 or activation_all.shape[0] != data_store['electrode_positions_all'].shape[0]:
+            return jsonify({'error': 'activation_all has the wrong length'}), 400
+        mesh_activation = interpolate_activation_to_mesh(activation_all)
+    else:
+        segment_id = int(payload.get('segment_id', 0))
+        activation = np.asarray(payload.get('activation_uni', []), dtype=np.float64)
 
-    if segment_id < 0 or segment_id >= data_store['segment_count']:
-        return jsonify({'error': 'segment_id is out-of-range'}), 400
+        if segment_id < 0 or segment_id >= data_store['segment_count']:
+            return jsonify({'error': 'segment_id is out-of-range'}), 400
 
-    expected_shape = np.asarray(data_store['activation_uni'][segment_id], dtype=np.float64).shape
-    if activation.shape != expected_shape:
-        return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
+        expected_shape = np.asarray(data_store['activation_uni'][segment_id], dtype=np.float64).shape
+        if activation.shape != expected_shape:
+            return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
 
-    mesh_activation = interpolate_activation_to_mesh(activation)
+        # Expand segment activation into the flattened full electrode array
+        total = data_store['electrode_positions_all'].shape[0]
+        activation_all = np.zeros((total,), dtype=np.float64)
+        # determine start index of this segment in flattened ordering
+        start = 0
+        for s in range(segment_id):
+            start += int(np.asarray(data_store['segment_positions'][s]).shape[0])
+        activation_all[start:start + activation.shape[0]] = activation
+        mesh_activation = interpolate_activation_to_mesh(activation_all)
     return jsonify(json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
                             for value in mesh_activation]

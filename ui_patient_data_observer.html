@@ -76,12 +76,33 @@
             if (!appData || !Array.isArray(appData.segment_positions)) return [];
             return appData.segment_positions[currentSegmentIndex] || [];
         }
+        function getAllSegmentPositions() {
+            if (!appData || !Array.isArray(appData.segment_positions)) return [];
+            const all = [];
+            for (let s = 0; s < appData.segment_count; s++) {
+                const seg = appData.segment_positions[s] || [];
+                for (let i = 0; i < seg.length; i++) all.push(seg[i]);
+            }
+            return all;
+        }
 
         function getCurrentActivation() {
             if (!appData || !Array.isArray(appData.activation_uni)) return [];
             return appData.activation_uni[currentSegmentIndex] || [];
         }
 
+        function getAllActivations() {
+            if (!appData || !Array.isArray(appData.activation_uni)) return [];
+            const all = [];
+            for (let s = 0; s < appData.segment_count; s++) {
+                const seg = appData.activation_uni[s] || [];
+                for (let i = 0; i < seg.length; i++) {
+                    const v = seg[i];
+                    all.push((v === null || v === undefined || !Number.isFinite(v)) ? 0 : v);
+                }
+            }
+            return all;
+        }
         // Load data on page load
         async function loadData() {
             const response = await fetch('/api/data');
@@ -208,8 +229,7 @@
         async function refreshMeshInterpolation() {
             const requestId = ++interpolationRequestId;
             const payloadBody = {
-                segment_id: currentSegmentIndex,
-                activation_uni: getCurrentActivation()
+                activation_all: getAllActivations()
             };
             const response = await fetch('/api/interpolate', {
                 method: 'POST',
@@ -226,15 +246,17 @@
         function splitElectrodesByActivation(activation, electrodePositions) {
             const colors = computeColors(activation);
             const activePosns = [], activeColors = [], inactivePosns = [];
+            const inactiveColors = [];
             electrodePositions.forEach((pos, index) => {
                 if (activation[index] !== 0 && Number.isFinite(activation[index])) {
                     activePosns.push(pos);
                     activeColors.push(colors[index]);
                 } else {
                     inactivePosns.push(pos);
+                    inactiveColors.push(colors[index]);
                 }
             });
-            return { activePosns, activeColors, inactivePosns };
+            return { activePosns, activeColors, inactivePosns, inactiveColors };
         }
 
         function update3DActivationColors() {
@@ -242,36 +264,65 @@
             if (!plot.data) return;
             const activation = getCurrentActivation();
             const electrodePositions = getCurrentSegmentPositions();
+            const allElectrodePositions = getAllSegmentPositions();
             const meshActivation = interpolateMeshActivation(activation);
             const range = getActivationRange(activation);
             const meshColors = getMeshColorSettings(meshActivation, range);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
-            const { activePosns, activeColors, inactivePosns } = splitElectrodesByActivation(activation, electrodePositions);
+            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions);
 
+            // update mesh coloring
             Plotly.restyle(plot, {
                 intensity: [meshColors.intensity],
                 colorscale: [meshColors.colorscale],
                 cmin: meshColors.cmin,
                 cmax: meshColors.cmax
             }, [0]);
+
+            // update current-segment active/inactive electrodes
             Plotly.restyle(plot, {
-                x: [activePosns.map(p => p[0])],
-                y: [activePosns.map(p => p[1])],
-                z: [activePosns.map(p => p[2])],
-                'marker.color': [activeColors]
-            }, [2]);
+                x: [inactivePosns.map(p => p[0])],
+                y: [inactivePosns.map(p => p[1])],
+                z: [inactivePosns.map(p => p[2])],
+                'marker.color': [inactiveColors]
+            }, [3]);
+            Plotly.restyle(plot, {
+                x: [otherPosns.map(p => p[0])],
+                y: [otherPosns.map(p => p[1])],
+                z: [otherPosns.map(p => p[2])],
+                'marker.color': [otherColors]
+            }, [4]);
             Plotly.restyle(plot, {
                 x: [inactivePosns.map(p => p[0])],
                 y: [inactivePosns.map(p => p[1])],
                 z: [inactivePosns.map(p => p[2])]
             }, [3]);
+
+            // update other-segments electrodes (all electrodes except current segment)
+            const currLen = electrodePositions.length;
+            let startIndex = 0;
+            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.segment_positions[s] || []).length;
+            const before = allElectrodePositions.slice(0, startIndex);
+            const after = allElectrodePositions.slice(startIndex + currLen);
+            const otherPosns = before.concat(after);
+            const allActivations = getAllActivations();
+            const allColors = computeColors(allActivations);
+            const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
+            Plotly.restyle(plot, {
+                x: [otherPosns.map(p => p[0])],
+                y: [otherPosns.map(p => p[1])],
+                z: [otherPosns.map(p => p[2])],
+                'marker.color': [otherColors]
+            }, [4]);
+
+            // update activation colorbar trace
             Plotly.restyle(plot, {
                 'marker.color': [[range.min, range.max]],
                 'marker.colorscale': [getActivationColorscale()],
                 'marker.cmin': range.min,
                 'marker.cmax': range.max,
                 'marker.showscale': showMesh && activation.some(value => value !== 0)
-            }, [5]);
+            }, [6]);
         }
 
         function render3DPlot(preserveCamera = false) {
@@ -328,7 +379,8 @@
                 hoverinfo: 'none',
             };
 
-            const { activePosns, activeColors, inactivePosns } = splitElectrodesByActivation(activation, electrodePositions);
+            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions);
+            const allElectrodePositions = getAllSegmentPositions();
 
             const electrodeActiveTrace = {
                 type: 'scatter3d',
@@ -346,8 +398,29 @@
                 x: inactivePosns.map(p => p[0]),
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
-                marker: { size: 2, color: 'rgb(128,128,128)', opacity: 0.15 },
+                marker: { size: 2, color: inactiveColors, opacity: 0.6 },
                 showlegend: false, hoverinfo: 'none',
+            };
+
+            // other segments (not the currently selected segment)
+            const currLen = electrodePositions.length;
+            let startIndex = 0;
+            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.segment_positions[s] || []).length;
+            const before = allElectrodePositions.slice(0, startIndex);
+            const after = allElectrodePositions.slice(startIndex + currLen);
+            const otherPosns = before.concat(after);
+            const allActivations = getAllActivations();
+            const allColors = computeColors(allActivations);
+            const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
+
+            const otherSegmentsTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: otherPosns.map(p => p[0]),
+                y: otherPosns.map(p => p[1]),
+                z: otherPosns.map(p => p[2]),
+                marker: { size: 2, color: otherColors, opacity: 0.8 },
+                showlegend: false, hoverinfo: 'none'
             };
 
             const labelTexts = electrodePositions.map((_, i) => i.toString());
@@ -408,7 +481,7 @@
                 layout.scene.camera = mesh_and_electrode.layout.scene.camera;
             }
 
-            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, electrodeLabelTrace, activationColorbarTrace], layout, {
+            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, otherSegmentsTrace, electrodeLabelTrace, activationColorbarTrace], layout, {
                 responsive: true
             });
         }
@@ -747,7 +820,7 @@
             Plotly.restyle(plot, { visible: showMesh }, [0, 1]);
             Plotly.restyle(plot, {
                 'marker.showscale': showMesh && getCurrentActivation().some(value => value !== 0)
-            }, [5]);
+            }, [6]);
             if (showMesh) {
                 refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
             }
