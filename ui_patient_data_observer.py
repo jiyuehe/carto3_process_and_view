@@ -26,7 +26,28 @@ import webbrowser
 import threading
 import subprocess
 import time
-import utility
+import configuration
+
+
+def json_safe(value):
+    """Convert NumPy/NaN values into plain Python data that serializes cleanly as JSON."""
+    if isinstance(value, np.ndarray):
+        return [json_safe(v) for v in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [json_safe(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): json_safe(v) for k, v in value.items()}
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, (float, np.floating)):
+        if not np.isfinite(value):
+            return None
+        return float(value)
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (bool, str)) or value is None:
+        return value
+    return value
 
 # functions for projecting electrodes onto the mesh and interpolating activation times
 def _closest_points_on_triangles(point, triangles):
@@ -128,31 +149,52 @@ def project_electrodes_to_mesh(vertices, faces, electrodes):
 
 #%%
 # setting
-directory = utility.configuration.directory_setup()
-name_prefix = utility.configuration.map_name()
+directory = configuration.directory_setup()
+name_prefix = configuration.map_name()
 
 # load map data
-data = np.load(directory['data'] / f'{name_prefix}_clinical.npz', allow_pickle=True)
-clinical_data = {
+data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
+mesh = {
+    k: (data[k].item() if isinstance(data[k], np.ndarray) and data[k].ndim == 0 else data[k])
+    for k in data.files
+}
+
+data = np.load(directory['data'] / f'{name_prefix}_catheter.npz', allow_pickle=True)
+catheter = {
     k: (data[k].item() if isinstance(data[k], np.ndarray) and data[k].ndim == 0 else data[k])
     for k in data.files
 }
 
 # variable to store data
+segment_positions = np.asarray(catheter.get('mapping_position_unipolar', []), dtype=object)
+segment_count = len(segment_positions)
+segment_electrode_count = int(segment_positions[0].shape[0]) if segment_count else 0
+
+egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object)
+egm_bi_original = np.asarray(catheter.get('mapping_electrogram_bipolar', []), dtype=object)
+egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object)
+activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', np.zeros((segment_count, segment_electrode_count), dtype=object)), dtype=object)
+activation_bi = np.asarray(catheter.get('mapping_electrogram_bipolar_activation_within_woi', activation_uni), dtype=object)
+
 data_store = {
     'directory': directory,
     'name_prefix': name_prefix,
-    'clinical_data': clinical_data,
-    'node_positions': clinical_data['geometry_original_vertex'],
-    'mesh_vertex': clinical_data['geometry_original_vertex'],
-    'mesh_face': clinical_data['geometry_original_face'],
-    'mesh_edge': clinical_data['geometry_original_edge'],
-    'electrode_positions': clinical_data['electrode_positions'],
-    'egm_uni_original': clinical_data['clinical_electrogram_unipolar_original'],
-    'egm_bi_original': clinical_data['clinical_electrogram_bipolar_original'],
-    'egm_ref': clinical_data['clinical_electrogram_reference'],
-    'activation_uni': clinical_data['clinical_activation_uni'],
-    'activation_bi': clinical_data['clinical_activation_bi'],
+    'clinical_data': catheter,
+    'node_positions': mesh['geometry_original_vertex'],
+    'mesh_vertex': mesh['geometry_original_vertex'],
+    'mesh_face': mesh['geometry_original_face'],
+    'mesh_edge': mesh['geometry_original_edge'],
+    'segment_positions': segment_positions,
+    'segment_count': segment_count,
+    'segment_electrode_count': segment_electrode_count,
+    'electrode_positions': segment_positions[0] if segment_count else np.empty((0, 3), dtype=float),
+    'egm_uni_original': egm_uni_original,
+    'egm_bi_original': egm_bi_original,
+    'egm_ref': egm_ref,
+    'activation_uni': activation_uni,
+    'activation_bi': activation_bi,
+    'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
+    'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
 }
 
 # Geometry-dependent projection is cached because it does not change when
@@ -244,73 +286,84 @@ def get_data():
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
         'mesh_edge': data_store['mesh_edge'].tolist(),
-        'electrode_positions': data_store['electrode_positions'].tolist(),
-        # Interpolation is requested only after its UI toggle is enabled.
+        'segment_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['segment_positions']],
+        'electrode_positions': np.asarray(data_store['electrode_positions'], dtype=float).tolist(),
         'mesh_activation': [None] * len(data_store['mesh_vertex']),
-        'clinical_electrogram_woi_start': int(data_store['clinical_data']['clinical_electrogram_woi_start']),
-        'clinical_electrogram_woi_end': int(data_store['clinical_data']['clinical_electrogram_woi_end']),
-        'activation_uni': data_store['activation_uni'].tolist(),
-        'activation_bi': data_store['activation_bi'].tolist(),
-        'n_electrodes': len(data_store['electrode_positions'])
+        'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
+        'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),
+        'activation_uni': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_uni']],
+        'activation_bi': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_bi']],
+        'segment_count': int(data_store['segment_count']),
+        'segment_electrode_count': int(data_store['segment_electrode_count']),
+        'n_segments': int(data_store['segment_count']),
+        'n_electrodes': int(data_store['segment_electrode_count'])
     }
-        
-    return jsonify(data)
+
+    return jsonify(json_safe(data))
 
 @app.route('/api/electrograms', methods=['POST'])
 def get_electrograms():
     payload = request.get_json(silent=True) or {}
-    electrode_ids = payload.get('electrode_ids') or []
+    segment_id = int(payload.get('segment_id', 0))
 
-    try:
-        electrode_ids = [int(e_id) for e_id in electrode_ids]
-    except (TypeError, ValueError):
-        return jsonify({'error': 'electrode_ids must be a list of integers'}), 400
+    if segment_id < 0 or segment_id >= data_store['segment_count']:
+        return jsonify({'error': 'segment_id is out-of-range'}), 400
 
-    n_electrodes = len(data_store['electrode_positions'])
-    if any((e_id < 0 or e_id >= n_electrodes) for e_id in electrode_ids):
-        return jsonify({'error': 'electrode_ids contains out-of-range index'}), 400
+    egm_uni = np.asarray(data_store['egm_uni_original'][segment_id], dtype=float)
+    egm_bi = np.asarray(data_store['egm_bi_original'][segment_id], dtype=float) if data_store['segment_count'] > 0 and data_store['egm_bi_original'].size > 0 else np.empty((egm_uni.shape[0], 0), dtype=float)
+    egm_ref = np.asarray(data_store['egm_ref'][segment_id], dtype=float)
 
-    egm_uni = data_store['egm_uni_original']
-    egm_bi = data_store['egm_bi_original']
-    egm_ref = data_store['egm_ref']
+    n_electrodes = egm_uni.shape[1] if egm_uni.ndim > 1 else 0
+    if n_electrodes == 0:
+        return jsonify({'error': 'no electrodes available for this segment'}), 400
 
     response = {
-        'electrode_ids': electrode_ids,
-        'egm_uni': [egm_uni[e_id].tolist() for e_id in electrode_ids],
-        'egm_bi': [egm_bi[e_id].tolist() for e_id in electrode_ids],
-        'egm_ref': [egm_ref[e_id].tolist() for e_id in electrode_ids],
+        'segment_id': segment_id,
+        'electrode_ids': list(range(n_electrodes)),
+        'egm_uni': [egm_uni[:, e_id].tolist() for e_id in range(n_electrodes)],
+        'egm_bi': [egm_bi[:, min(e_id, egm_bi.shape[1] - 1)].tolist() if egm_bi.shape[1] > 0 else [] for e_id in range(n_electrodes)],
+        'egm_ref': [egm_ref.tolist() for _ in range(n_electrodes)],
     }
-    return jsonify(response)
+    return jsonify(json_safe(response))
 
 
 @app.route('/api/interpolate', methods=['POST'])
 def interpolate_activation():
     payload = request.get_json(silent=True) or {}
+    segment_id = int(payload.get('segment_id', 0))
     activation = np.asarray(payload.get('activation_uni', []), dtype=np.float64)
-    if activation.shape != data_store['activation_uni'].shape:
-        return jsonify({'error': 'activation_uni has the wrong length'}), 400
+
+    if segment_id < 0 or segment_id >= data_store['segment_count']:
+        return jsonify({'error': 'segment_id is out-of-range'}), 400
+
+    expected_shape = np.asarray(data_store['activation_uni'][segment_id], dtype=np.float64).shape
+    if activation.shape != expected_shape:
+        return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
+
     mesh_activation = interpolate_activation_to_mesh(activation)
-    return jsonify({
+    return jsonify(json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
                             for value in mesh_activation]
-    })
+    }))
 
 @app.route('/api/save', methods=['POST'])
 def save_activation_times():
     payload = request.get_json(silent=True) or {}
+    segment_id = int(payload.get('segment_id', 0))
     activation_uni = payload.get('activation_uni')
 
-    activation_uni = np.asarray(activation_uni, dtype=int)
+    if segment_id < 0 or segment_id >= data_store['segment_count']:
+        return jsonify({'error': 'segment_id is out-of-range'}), 400
 
+    activation_uni = np.asarray(activation_uni, dtype=int)
     save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical.npz"
 
     clinical_data = data_store['clinical_data']
-    clinical_data['clinical_activation_uni'] = activation_uni
-
+    clinical_data['mapping_electrogram_unipolar_activation_within_woi'][segment_id] = activation_uni
     np.savez(save_path, **clinical_data)
-    print(f"Saved updated activation times to {save_path}")
+    print(f"Saved updated activation times for segment {segment_id} to {save_path}")
 
-    return jsonify({'status': 'ok', 'path': str(save_path)})
+    return jsonify({'status': 'ok', 'path': str(save_path), 'segment_id': segment_id})
 
 #%%
 if __name__ == '__main__':
