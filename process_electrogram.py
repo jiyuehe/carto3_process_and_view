@@ -16,7 +16,6 @@
 import numpy as np
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
-
 import utility
 
 #%%
@@ -44,7 +43,7 @@ surface_name = catheter['surface_name']
 
 # loop through each recording segment
 n_segment = len(catheter['mapping_position_unipolar']) # number of recording segments
-for n in range(n_segment):
+for n in [0]: #range(n_segment):
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
     egm_unipolar = mapping_electrogram_unipolar[n]
@@ -69,41 +68,33 @@ for n in range(n_segment):
 
     debug_plot = 0
     if debug_plot: # show the surface ECG leads and detected QRS peaks
-        # single axes: plot all surface ECG leads with vertical offsets
         fig, ax = plt.subplots(figsize=(12, 8))
         n_channel = egm_surface.shape[1]
 
-        # determine spacing based on signal ranges to separate traces visually
-        per_lead_range = np.ptp(egm_surface, axis=0)
-        max_range = np.nanmax(per_lead_range) if per_lead_range.size > 0 else 1.0
-        spacing = max(1.0, max_range * 1.5)
+        # determine spacing based on signal magnitudes to separate traces visually
+        per_channel_magnitude = np.ptp(egm_surface, axis=0) # peak-to-peak voltage
+        max_magnitude = np.nanmax(per_channel_magnitude) 
+        spacing = max_magnitude * 1.5
         offsets = np.arange(n_channel) * spacing
 
         # plot each channel with an offset
         for channel_idx in range(n_channel):
             ax.plot(egm_surface[:, channel_idx] + offsets[channel_idx], color='blue', linewidth=1)
 
-        # plot the combined (summed) signal scaled and placed below the leads
-        sample_axis = np.arange(surface_signal_sum.shape[0])
-        if np.ptp(surface_signal_sum) > 0:
-            surface_signal_scaled = surface_signal_sum * (max_range / np.ptp(surface_signal_sum)) - spacing
-        else:
-            surface_signal_scaled = surface_signal_sum - spacing
+        # plot the summed signal scaled and placed at bottom
+        surface_signal_sum_scaled = surface_signal_sum * (max_magnitude / np.ptp(surface_signal_sum)) - spacing
+        surface_signal_smooth_scaled = surface_signal_smooth * (max_magnitude / np.ptp(surface_signal_smooth)) - spacing
 
-        ax.plot(sample_axis, surface_signal_scaled, color='magenta', linewidth=1)
-        ax.plot(sample_axis, np.convolve(surface_signal_sum, smooth_kernel, mode='same') * (max_range / np.ptp(surface_signal_sum)) - spacing, color='blue', linewidth=1)
-        if len(qrs_peak_indices) > 0:
-            ax.scatter(qrs_peak_indices, surface_signal_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
-
+        ax.plot(surface_signal_sum_scaled, color='magenta', linewidth=1)
+        ax.plot(surface_signal_smooth_scaled, color='blue', linewidth=1)
+        ax.scatter(qrs_peak_indices, surface_signal_sum_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
+        
         ax.set_xlabel('Time (ms)')
-        # show channel names as y-tick labels at each trace offset
-        ax.set_yticks(offsets)
-        ax.set_yticklabels(surface_name, fontsize=8)
-        ax.set_title(f'Surface ECGs and QRS detection (segment {n+1}/{n_segment})')
-        ax.grid(False)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
+        yticks = np.concatenate(([-spacing], offsets))
+        ylabels = ['sum'] + list(surface_name)
+        ax.set_yticks(yticks)
+        ax.set_yticklabels(ylabels, fontsize=8)
+        ax.set_title(f'Surface ECGs and QRS detection (segment id {n} of [0, {n_segment-1}])')
         plt.tight_layout()
 
     # create QRS morphology template for each of the unipolar electrograms
