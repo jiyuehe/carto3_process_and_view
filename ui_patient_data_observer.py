@@ -176,47 +176,83 @@ egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object)
 activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', np.zeros((segment_count, segment_electrode_count), dtype=object)), dtype=object)
 activation_bi = np.asarray(catheter.get('mapping_electrogram_bipolar_activation_within_woi', activation_uni), dtype=object)
 
+def _segment_position_count(segment):
+    """Return the number of 3D positions in a segment, or 0 if it is missing/invalid."""
+    if segment is None:
+        return 0
+    try:
+        arr = np.asarray(segment, dtype=float)
+    except Exception:
+        return 0
+    if arr.size == 0:
+        return 0
+    if arr.ndim == 1:
+        if arr.size == 3:
+            return 1
+        if arr.size % 3 == 0:
+            return arr.size // 3
+        return 0
+    if arr.ndim >= 2 and arr.shape[-1] == 3:
+        return int(arr.reshape(-1, 3).shape[0])
+    return 0
+
+
 def _flatten_segment_positions(segment_positions):
     out = []
     for seg in segment_positions:
+        if seg is None:
+            continue
         try:
             arr = np.asarray(seg, dtype=float)
         except Exception:
-            try:
-                for elem in seg:
-                    e = np.asarray(elem, dtype=float)
-                    if e.size == 3:
-                        out.append(e.reshape(3,))
-            except Exception:
-                continue
+            continue
+        if arr.size == 0:
+            continue
+        if arr.ndim == 1:
+            if arr.size == 3:
+                out.append(arr.reshape(3,))
+            elif arr.size % 3 == 0:
+                for i in range(0, arr.size, 3):
+                    out.append(arr[i:i + 3].reshape(3,))
+            continue
+        if arr.shape[-1] == 3:
+            rows = arr.reshape(-1, 3)
+            for r in rows:
+                out.append(r)
         else:
-            if arr.ndim == 1:
-                if arr.size == 3:
-                    out.append(arr.reshape(3,))
-                else:
-                    try:
-                        for elem in seg:
-                            e = np.asarray(elem, dtype=float)
-                            if e.size == 3:
-                                out.append(e.reshape(3,))
-                    except Exception:
-                        continue
-            else:
+            for row in arr:
                 try:
-                    if arr.shape[-1] == 3:
-                        rows = arr.reshape(-1, 3)
-                        for r in rows:
-                            out.append(r)
-                    else:
-                        for row in arr:
-                            e = np.asarray(row, dtype=float)
-                            if e.size == 3:
-                                out.append(e.reshape(3,))
+                    e = np.asarray(row, dtype=float)
                 except Exception:
                     continue
+                if e.size == 3:
+                    out.append(e.reshape(3,))
     if len(out) == 0:
         return np.empty((0, 3), dtype=float)
     return np.vstack(out)
+
+
+def _flatten_segment_activations(segment_positions, segment_activations):
+    """Flatten activation data only for segments with valid positions, matching the mesh projection array."""
+    out = []
+    for segment_id, segment in enumerate(segment_positions):
+        if segment is None:
+            continue
+        position_count = _segment_position_count(segment)
+        if position_count == 0:
+            continue
+        try:
+            values = np.asarray(segment_activations[segment_id], dtype=float).reshape(-1)
+        except Exception:
+            continue
+        if values.size == 0:
+            continue
+        if values.size < position_count:
+            values = np.pad(values, (0, position_count - values.size), constant_values=0.0)
+        elif values.size > position_count:
+            values = values[:position_count]
+        out.extend(values.tolist())
+    return np.asarray(out, dtype=float)
 
 data_store = {
     'directory': directory,
@@ -231,7 +267,7 @@ data_store = {
     'segment_electrode_count': segment_electrode_count,
     # keep first-segment electrode positions for legacy clients
     'electrode_positions': segment_positions[0] if segment_count else np.empty((0, 3), dtype=float),
-    # flattened positions for all electrodes across all segments
+    # flattened positions for all electrodes across all segments; ignore missing segments
     'electrode_positions_all': _flatten_segment_positions(segment_positions),
     'egm_uni_original': egm_uni_original,
     'egm_bi_original': egm_bi_original,
@@ -392,14 +428,7 @@ def interpolate_activation():
         if activation.shape != expected_shape:
             return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
 
-        # Expand segment activation into the flattened full electrode array
-        total = data_store['electrode_positions_all'].shape[0]
-        activation_all = np.zeros((total,), dtype=np.float64)
-        # determine start index of this segment in flattened ordering
-        start = 0
-        for s in range(segment_id):
-            start += int(np.asarray(data_store['segment_positions'][s]).shape[0])
-        activation_all[start:start + activation.shape[0]] = activation
+        activation_all = _flatten_segment_activations(data_store['segment_positions'], data_store['activation_uni'])
         mesh_activation = interpolate_activation_to_mesh(activation_all)
     return jsonify(json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
