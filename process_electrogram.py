@@ -17,12 +17,13 @@ import numpy as np
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 import utility
+import configuration
 
 #%%
 # setting
 half_window_size_of_woi = 300//2 # number of time points before and after the 2000 ms mark
-directory = utility.configuration.directory_setup()
-name_prefix = utility.configuration.map_name()
+directory = configuration.directory_setup()
+name_prefix = configuration.map_name()
 
 # load data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
@@ -99,10 +100,17 @@ for n in [0]: #range(n_segment):
 
     # create QRS morphology template for each of the unipolar electrograms
     # ------------------------------
-    qrs_half_window = utility.signal_processing.estimate_far_field_half_window(egm_unipolar,qrs_peak_indices) # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
-    template_len = 2 * qrs_half_window + 1
+    # copy the global QRS peak indices for each unipolar channel
+    qrs_peak_indices_per_channel = [np.copy(qrs_peak_indices) for _ in range(egm_unipolar.shape[1])]
 
-    qrs_template_unipolar, _ = utility.signal_processing.create_consistent_template(egm_unipolar,qrs_peak_indices,qrs_half_window)
+    # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
+    signal = egm_unipolar
+    peak_indices = qrs_peak_indices_per_channel
+    qrs_half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
+    template_len = 2 * qrs_half_window + 1
+#%%
+    half_window = qrs_half_window
+    qrs_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window)
 
     # subtract the QRS template from each unipolar electrogram to remove the QRS component
     # ------------------------------
