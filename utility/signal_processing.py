@@ -145,44 +145,48 @@ def create_consistent_template(signal, peak_indices, half_window):
     template_len = 2 * half_window + 1
     zero_template = np.zeros((n_channels, template_len), dtype=float)
 
-    raw_beats = []
-    normalized_beats = []
-    for peak_idx in peak_indices:
-        start = max(0, peak_idx - half_window)
-        end = min(n_samples, peak_idx + half_window + 1)
-        beat = signal[start:end, :]
+    template = zero_template
+    for ch in range(n_channels):
+        ch_peak_indices = np.asarray(peak_indices[ch], dtype=int)
+        raw_beats = []
+        for peak_idx in ch_peak_indices:
+            start = max(0, peak_idx - half_window)
+            end = min(n_samples, peak_idx + half_window + 1)
+            beat = signal[start:end, ch]
 
-        if beat.shape[0] < template_len:
-            padded = np.zeros((template_len, n_channels), dtype=float)
-            if peak_idx <= half_window:
-                missing_front = half_window - peak_idx
-                padded[missing_front:missing_front + beat.shape[0], :] = beat
-            else:
-                padded[:beat.shape[0], :] = beat
-            beat = padded
+            if beat.shape[0] < template_len:
+                padded = np.zeros((template_len,), dtype=float)
+                if peak_idx <= half_window:
+                    missing_front = half_window - peak_idx
+                    padded[missing_front:missing_front + beat.shape[0]] = beat
+                else:
+                    padded[:beat.shape[0]] = beat
+                beat = padded
 
-        beat = beat - np.median(beat, axis=0, keepdims=True)
-        beat_norm = np.linalg.norm(beat)
-        if beat_norm == 0:
-            return np.squeeze(zero_template), False
-        raw_beats.append(beat)
-        normalized_beats.append(beat / beat_norm)
+            beat = beat - np.median(beat)
+            beat_norm = np.linalg.norm(beat)
 
-    if len(raw_beats) == 1:
-        return np.squeeze(raw_beats[0].T), True
+            raw_beats.append(beat)
 
-    beat_stack = np.stack(normalized_beats, axis=0)
-    morphology = np.median(beat_stack, axis=0)
-    morphology_norm = np.linalg.norm(morphology)
-    if morphology_norm == 0:
-        return np.squeeze(zero_template), False
 
-    morphology_reference = morphology / morphology_norm
-    morphology_correlations = np.sum(
-        beat_stack * morphology_reference,
-        axis=(1, 2),
-    )
-    if np.any(morphology_correlations < consistency_threshold):
-        return np.squeeze(zero_template), False
+        if len(raw_beats) == 1:
+            template[ch, :] = raw_beats[0]
+            continue
 
-    return np.squeeze(np.median(np.stack(raw_beats, axis=0), axis=0).T), True
+        beat_stack = np.stack(raw_beats, axis=0)
+        morphology = np.median(beat_stack, axis=0)
+        morphology_norm = np.linalg.norm(morphology)
+        if morphology_norm == 0:
+            return zero_template, False
+
+        morphology_reference = morphology / morphology_norm
+        morphology_correlations = np.sum(
+            beat_stack * morphology_reference,
+            axis=1,
+        )
+        if np.any(morphology_correlations < consistency_threshold):
+            return zero_template, False
+
+        template[ch, :] = np.median(beat_stack, axis=0)
+
+    return template
