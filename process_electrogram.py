@@ -42,10 +42,55 @@ for seg_idx, seg in enumerate(segment_positions):
     if seg is None:
         segment_id_to_delete.append(seg_idx)
 
+catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
 catheter['mapping_electrogram_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_electrogram_unipolar']) if idx not in segment_id_to_delete]
 catheter['surface_electrogram'] = [seg for idx, seg in enumerate(catheter['surface_electrogram']) if idx not in segment_id_to_delete]
-catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
 catheter['reference_electrogram'] = [seg for idx, seg in enumerate(catheter['reference_electrogram']) if idx not in segment_id_to_delete]
+catheter['reference_name'] = [seg for idx, seg in enumerate(catheter['reference_name']) if idx not in segment_id_to_delete]
+
+#%%
+debug_plot = 0
+if debug_plot: # plot the recordings of each segment
+    recording_groups = (
+        ('Mapping unipolar electrograms', catheter['mapping_electrogram_unipolar'], mapping_name_unipolar, 'magenta'),
+        ('Surface electrograms', catheter['surface_electrogram'], surface_name, 'blue'),
+        ('Reference electrogram', catheter['reference_electrogram'], ['reference'], 'cyan'),
+    )
+
+    for segment_id in range(len(catheter['mapping_electrogram_unipolar'])):
+        fig, axes = plt.subplots(1, 3, figsize=(14, 10), sharex=True)
+
+        for axis, (title, segment_recordings, channel_names, color) in zip(axes, recording_groups):
+            recordings = np.asarray(segment_recordings[segment_id], dtype=float)
+            if recordings.ndim == 1:
+                recordings = recordings[:, None]
+
+            channel_magnitude = np.ptp(recordings, axis=0)
+            trace_spacing = max(1.0, np.nanmax(channel_magnitude) * 1.2)
+            trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
+
+            axis.plot(
+                np.arange(recordings.shape[0]),
+                recordings + trace_offsets,
+                color=color,
+                linewidth=0.7,
+            )
+            axis.set_title(title)
+            axis.set_yticks(trace_offsets)
+            axis.set_yticklabels(channel_names)
+            axis.grid(False)
+
+        axes[-1].set_xlabel('Time (ms)')
+        fig.suptitle(
+            f'Recording segment {segment_id} of '
+            f'[0, {len(catheter["mapping_electrogram_unipolar"]) - 1}]'
+        )
+        fig.tight_layout()
+
+        # save the figure
+        fig_path = directory['result'] / f'recording_segment_{segment_id}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
 
 mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
 surface_electrogram = catheter['surface_electrogram']
