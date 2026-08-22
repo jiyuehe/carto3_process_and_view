@@ -42,8 +42,14 @@ surface_name = catheter['surface_name']
 segment_positions = catheter['mapping_position_unipolar']
 segment_id_to_delete = []
 for seg_idx, seg in enumerate(segment_positions):
-    if seg is None:
+    if seg is None: # it is missing all electrode positions
         segment_id_to_delete.append(seg_idx)
+    elif seg is not None:
+        # check if it is missing a few electrode positions
+        n_electrode_position = seg.shape[0]
+        n_electrogram = catheter['mapping_electrogram_unipolar'][seg_idx].shape[1]
+        if n_electrode_position != n_electrogram:
+            segment_id_to_delete.append(seg_idx)
 
 catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
 catheter['mapping_electrogram_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_electrogram_unipolar']) if idx not in segment_id_to_delete]
@@ -113,9 +119,13 @@ for n in range(len(catheter['mapping_position_unipolar'])):
     projected_positions, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, positions)
     electrode_positions_on_mesh.append(projected_positions)
 
-# save the variable
-mesh['electrode_positions'] = electrode_positions
-mesh['electrode_positions_on_mesh'] = electrode_positions_on_mesh
+# Store ragged per-segment arrays in explicit one-dimensional object arrays.
+# np.savez otherwise tries to infer a homogeneous numeric shape and fails when
+# segments contain different numbers of electrodes.
+mesh['electrode_positions'] = np.empty(len(electrode_positions), dtype=object)
+mesh['electrode_positions'][:] = electrode_positions
+mesh['electrode_positions_on_mesh'] = np.empty(len(electrode_positions_on_mesh), dtype=object)
+mesh['electrode_positions_on_mesh'][:] = electrode_positions_on_mesh
 file_path = directory['data'] / f'{name_prefix}_mesh.npz'
 np.savez(file_path, **mesh, allow_pickle=True)
 
