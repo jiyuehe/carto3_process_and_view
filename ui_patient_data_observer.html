@@ -740,7 +740,7 @@
 
         function updateSliderLabel() {
             const segmentLabel = appData.segment_count > 0 ? `${currentSegmentIndex + 1}/${appData.segment_count}` : '0/0';
-            document.getElementById('pageLabel').textContent = `Segment ${segmentLabel} (${appData.segment_electrode_count} electrodes)`;
+            document.getElementById('pageLabel').textContent = `Segment ${segmentLabel}`;
         }
 
         function navigateSegments(segmentIndex) {

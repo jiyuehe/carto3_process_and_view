@@ -13,10 +13,6 @@
 # limitations under the License.
 
 #%%
-import os
-from pathlib import Path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import cKDTree
@@ -27,125 +23,7 @@ import threading
 import subprocess
 import time
 import configuration
-
-
-def json_safe(value):
-    """Convert NumPy/NaN values into plain Python data that serializes cleanly as JSON."""
-    if isinstance(value, np.ndarray):
-        return [json_safe(v) for v in value.tolist()]
-    if isinstance(value, (list, tuple)):
-        return [json_safe(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): json_safe(v) for k, v in value.items()}
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, (float, np.floating)):
-        if not np.isfinite(value):
-            return None
-        return float(value)
-    if isinstance(value, (int, np.integer)):
-        return int(value)
-    if isinstance(value, (bool, str)) or value is None:
-        return value
-    return value
-
-# functions for projecting electrodes onto the mesh and interpolating activation times
-def _closest_points_on_triangles(point, triangles):
-    """Return the closest point on each triangle to a single 3-D point."""
-    a, b, c = triangles[:, 0], triangles[:, 1], triangles[:, 2]
-    ab, ac = b - a, c - a
-    ap = point - a
-    d1 = np.einsum('ij,ij->i', ab, ap)
-    d2 = np.einsum('ij,ij->i', ac, ap)
-    result = np.empty_like(a)
-    assigned = (d1 <= 0) & (d2 <= 0)
-    result[assigned] = a[assigned]
-
-    bp = point - b
-    d3 = np.einsum('ij,ij->i', ab, bp)
-    d4 = np.einsum('ij,ij->i', ac, bp)
-    mask = (d3 >= 0) & (d4 <= d3) & ~assigned
-    result[mask] = b[mask]
-    assigned |= mask
-
-    vc = d1 * d4 - d3 * d2
-    mask = (vc <= 0) & (d1 >= 0) & (d3 <= 0) & ~assigned
-    denom = d1 - d3
-    v = np.divide(d1, denom, out=np.zeros_like(d1), where=denom != 0)
-    result[mask] = a[mask] + v[mask, None] * ab[mask]
-    assigned |= mask
-
-    cp = point - c
-    d5 = np.einsum('ij,ij->i', ab, cp)
-    d6 = np.einsum('ij,ij->i', ac, cp)
-    mask = (d6 >= 0) & (d5 <= d6) & ~assigned
-    result[mask] = c[mask]
-    assigned |= mask
-
-    vb = d5 * d2 - d1 * d6
-    mask = (vb <= 0) & (d2 >= 0) & (d6 <= 0) & ~assigned
-    denom = d2 - d6
-    w = np.divide(d2, denom, out=np.zeros_like(d2), where=denom != 0)
-    result[mask] = a[mask] + w[mask, None] * ac[mask]
-    assigned |= mask
-
-    va = d3 * d6 - d5 * d4
-    mask = (va <= 0) & ((d4 - d3) >= 0) & ((d5 - d6) >= 0) & ~assigned
-    denom = (d4 - d3) + (d5 - d6)
-    w = np.divide(d4 - d3, denom, out=np.zeros_like(d3), where=denom != 0)
-    result[mask] = b[mask] + w[mask, None] * (c[mask] - b[mask])
-    assigned |= mask
-
-    mask = ~assigned
-    denom = va + vb + vc
-    v = np.divide(vb, denom, out=np.zeros_like(vb), where=denom != 0)
-    w = np.divide(vc, denom, out=np.zeros_like(vc), where=denom != 0)
-    result[mask] = a[mask] + ab[mask] * v[mask, None] + ac[mask] * w[mask, None]
-    return result
-
-def _nearest_indices(query, reference, count, block_size=256):
-    """Memory-bounded NumPy k-nearest-neighbour search."""
-    count = min(count, len(reference))
-    reference_sq = np.einsum('ij,ij->i', reference, reference)
-    indices = np.empty((len(query), count), dtype=np.int32)
-    distances_sq = np.empty((len(query), count), dtype=np.float64)
-    for start in range(0, len(query), block_size):
-        stop = min(start + block_size, len(query))
-        q = query[start:stop]
-        distance = (
-            np.einsum('ij,ij->i', q, q)[:, None]
-            + reference_sq[None, :]
-            - 2.0 * q @ reference.T
-        )
-        np.maximum(distance, 0, out=distance)
-        nearest = np.argpartition(distance, count - 1, axis=1)[:, :count]
-        nearest_distance = np.take_along_axis(distance, nearest, axis=1)
-        order = np.argsort(nearest_distance, axis=1)
-        indices[start:stop] = np.take_along_axis(nearest, order, axis=1)
-        distances_sq[start:stop] = np.take_along_axis(nearest_distance, order, axis=1)
-    return indices, distances_sq
-
-def project_electrodes_to_mesh(vertices, faces, electrodes):
-    """Project each electrode onto its closest candidate mesh triangle."""
-    vertex_faces = [[] for _ in range(len(vertices))]
-    for face_id, face in enumerate(faces):
-        for vertex_id in face:
-            vertex_faces[int(vertex_id)].append(face_id)
-
-    nearby_vertices, _ = _nearest_indices(electrodes, vertices, count=4)
-    projected = np.empty_like(electrodes, dtype=np.float64)
-    projection_faces = np.empty(len(electrodes), dtype=np.int32)
-    triangles = vertices[faces]
-    for electrode_id, vertex_ids in enumerate(nearby_vertices):
-        candidates = np.unique(np.concatenate([vertex_faces[v] for v in vertex_ids]))
-        points = _closest_points_on_triangles(electrodes[electrode_id], triangles[candidates])
-        delta = points - electrodes[electrode_id]
-        distance_sq = np.einsum('ij,ij->i', delta, delta)
-        best = int(np.argmin(distance_sq))
-        projected[electrode_id] = points[best]
-        projection_faces[electrode_id] = candidates[best]
-
-    return projected, projection_faces
+import utility
 
 #%%
 # setting
@@ -291,7 +169,7 @@ try:
     projection_faces = cached['projection_faces']
 except (OSError, KeyError, ValueError):
     projected_electrodes, projection_faces = (
-        project_electrodes_to_mesh(
+        utility.ui_functions.project_electrodes_to_mesh(
             data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions_all']
         )
     )
@@ -411,7 +289,7 @@ def get_data():
         'n_electrodes': int(data_store['segment_electrode_count'])
     }
 
-    return jsonify(json_safe(data))
+    return jsonify(utility.ui_functions.json_safe(data))
 
 @app.route('/api/electrograms', methods=['POST'])
 def get_electrograms():
@@ -436,7 +314,7 @@ def get_electrograms():
         'egm_bi': [egm_bi[:, min(e_id, egm_bi.shape[1] - 1)].tolist() if egm_bi.shape[1] > 0 else [] for e_id in range(n_electrodes)],
         'egm_ref': [egm_ref.tolist() for _ in range(n_electrodes)],
     }
-    return jsonify(json_safe(response))
+    return jsonify(utility.ui_functions.json_safe(response))
 
 
 @app.route('/api/interpolate', methods=['POST'])
@@ -462,7 +340,7 @@ def interpolate_activation():
 
         activation_all = _flatten_segment_activations(data_store['segment_positions'], data_store['activation_uni'])
         mesh_activation = interpolate_activation_to_mesh(activation_all)
-    return jsonify(json_safe({
+    return jsonify(utility.ui_functions.json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
                             for value in mesh_activation]
     }))
