@@ -333,7 +333,7 @@ if __name__ == '__main__':
         check=False,
     ).returncode == 0
     if stopped_port:
-        time.sleep(0.5)
+        time.sleep(5)
 
     # open the patient data observer user interface
     threading.Timer(1.0, webbrowser.open, args=[f'http://127.0.0.1:{server_port}']).start() # runs webbrowser.open on a background thread after a 1-second delay, while the main thread proceeds to start Flask. The 1-second delay gives Flask time to start up before the browser tries to connect

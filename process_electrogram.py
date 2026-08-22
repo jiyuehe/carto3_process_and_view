@@ -629,6 +629,7 @@ catheter['clinical_electrogram_woi_start'] = t_start
 catheter['clinical_electrogram_woi_end'] = t_end
 
 mapping_electrogram_unipolar_activation_within_woi = [None for _ in range(n_segment)]
+activation_time_edge_buffer = 10 # remove activation near the two ends of the window of interest
 for n in range(n_segment): # range(n_segment) or [some segment indices for debugging]
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
@@ -639,8 +640,8 @@ for n in range(n_segment): # range(n_segment) or [some segment indices for debug
     activation_times_within_woi = np.zeros((len(activation_times_unipolar_refined),), dtype=object)
     for channel_idx in range(len(activation_times_unipolar_refined)):
         activation_times = activation_times_unipolar_refined[channel_idx]
-        if activation_times is not None:
-            temp = activation_times[(activation_times >= t_start) & (activation_times <= t_end)]
+        if activation_times is not None and np.ptp(mapping_electrogram_unipolar_qrs_subtracted[channel_idx][t_start:t_end]) >= 0.1:
+            temp = activation_times[(activation_times >= t_start+activation_time_edge_buffer) & (activation_times <= t_end-activation_time_edge_buffer)]
             if len(temp) != 0:
                 activation_times_within_woi[channel_idx] = temp[0]
 
