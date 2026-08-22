@@ -308,7 +308,7 @@ def save_activation_times():
             app.logger.exception('Failed to save activation times to %s', save_path)
             return jsonify({'error': 'Unable to write the catheter data file'}), 500
 
-        # Commit the new values to server memory only after the file replacement succeeds.
+        # commit the new values to server memory only after the file replacement succeeds.
         clinical_data[activation_key] = updated_activation
         data_store['activation_uni'] = updated_activation
 
