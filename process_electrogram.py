@@ -31,16 +31,28 @@ carto = {k: data[k] for k in data.files}
 #%%
 # recording segments data
 catheter = carto['catheter'].item()
-mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
-surface_electrogram = catheter['surface_electrogram']
 mapping_name_unipolar = catheter['mapping_name_unipolar']
 mapping_name_unipolar = [name.replace("MCC_Dx_UniPolar_", "") for name in mapping_name_unipolar]
 surface_name = catheter['surface_name']
 
-n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording segments
-mapping_electrogram_unipolar_activation = [None for _ in range(n_segment)]
+# some segments may have missing electrode positions, remove those segments from the analysis
+segment_positions = catheter['mapping_position_unipolar']
+segment_id_to_delete = []
+for seg_idx, seg in enumerate(segment_positions):
+    if seg is None:
+        segment_id_to_delete.append(seg_idx)
+
+catheter['mapping_electrogram_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_electrogram_unipolar']) if idx not in segment_id_to_delete]
+catheter['surface_electrogram'] = [seg for idx, seg in enumerate(catheter['surface_electrogram']) if idx not in segment_id_to_delete]
+catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
+
+mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
+surface_electrogram = catheter['surface_electrogram']
 
 # loop through each recording segment
+n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording segments
+mapping_electrogram_unipolar_activation = [None for _ in range(n_segment)]
+mapping_electrogram_unipolar_qrs_subtracted = [None for _ in range(n_segment)]
 for n in range(n_segment):
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
@@ -147,6 +159,8 @@ for n in range(n_segment):
             signal_magnitude = np.ptp(signal_segment)
             if template_magnitude > 0.2 and signal_magnitude > 0.2:  # only subtract if both template and signal have significant magnitude
                 qrs_subtracted[seg_start:seg_end, channel_idx] -= template_segment * subtraction_window # the subtraction is tapered to avoid abrupt changes by multiplying with a tapering window (subtraction_window)
+
+    mapping_electrogram_unipolar_qrs_subtracted[n] = qrs_subtracted
 
     debug_plot = 0
     if debug_plot: # plot the original, QRS template, and QRS-subtracted electrograms
@@ -493,7 +507,7 @@ for n in range(n_segment):
 
 #%%
 # grab activations within a window of interest (WOI) around the 2000 ms mark for each recording segment
-half_window_size_of_woi = 300//2 # number of time points before and after the 2000 ms mark
+half_window_size_of_woi = 350//2 # number of time points before and after the 2000 ms mark
 t_start = 2000 - half_window_size_of_woi # window of interest start time index
 t_end = 2000 + half_window_size_of_woi # window of interest end time index
 
@@ -520,6 +534,8 @@ for n in range(n_segment): # range(n_segment) or [some segment indices for debug
 
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 catheter['mapping_electrogram_unipolar_activation_within_woi'] = mapping_electrogram_unipolar_activation_within_woi
+
+catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
 
 # convert sequence-like values to object arrays to avoid heterogeneous-shape errors
 catheter_to_save = {}

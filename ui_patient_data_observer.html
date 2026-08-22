@@ -578,8 +578,12 @@
             }
 
             const egmUniData = electrogramData.egm_uni || [];
+            const egmUniQrsSubtractedData = electrogramData.egm_uni_qrs_subtracted || [];
             const egmRefData = electrogramData.egm_ref || [];
-            const traces = [];
+            const referenceTraces = [];
+            const originalTraces = [];
+            const qrsSubtractedTraces = [];
+            const activationTraces = [];
             const yTickVals = [];
             const yTickText = [];
             let minY = Infinity;
@@ -600,7 +604,7 @@
                     const egmRef = egmRefData[eId];
                     const egmRefShifted = egmRef.map(val => val + i * shiftSpacing);
                     visibleSignals.push(egmRefShifted);
-                    traces.push({
+                    referenceTraces.push({
                         type: 'scatter',
                         mode: 'lines',
                         x: t,
@@ -611,20 +615,35 @@
                     });
                 }
 
-                traces.push({
+                originalTraces.push({
                     type: 'scatter',
                     mode: 'lines',
                     x: t,
                     y: egmUniShifted,
-                    line: { color: 'blue', width: 1 },
+                    line: { color: 'magenta', width: 1 },
                     showlegend: false,
                     hovertemplate: `Time: %{x}<br><extra></extra>`
                 });
 
+                if (Array.isArray(egmUniQrsSubtractedData[eId]) && egmUniQrsSubtractedData[eId].length > 0) {
+                    const egmUniQrsSubtracted = egmUniQrsSubtractedData[eId];
+                    const egmUniQrsSubtractedShifted = egmUniQrsSubtracted.map(val => val + i * shiftSpacing);
+                    visibleSignals.push(egmUniQrsSubtractedShifted);
+                    qrsSubtractedTraces.push({
+                        type: 'scatter',
+                        mode: 'lines',
+                        x: t,
+                        y: egmUniQrsSubtractedShifted,
+                        line: { color: 'blue', width: 1 },
+                        showlegend: false,
+                        hovertemplate: `Time: %{x}<br><extra></extra>`
+                    });
+                }
+
                 if (activationUni[eId] !== 0 && Number.isFinite(activationUni[eId]) && activationUni[eId] < egmUni.length) {
                     const actTime = activationUni[eId];
                     const actValue = egmUni[actTime] + i * shiftSpacing;
-                    traces.push({
+                    activationTraces.push({
                         type: 'scatter',
                         mode: 'markers',
                         x: [actTime],
@@ -647,6 +666,13 @@
                 yTickText.push(eId.toString());
             }
 
+            const traces = [
+                ...referenceTraces,
+                ...originalTraces,
+                ...qrsSubtractedTraces,
+                ...activationTraces
+            ];
+
             if (traces.length === 0 || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
                 Plotly.newPlot('plot_electrograms', [], {
                     title: { text: 'No electrogram data to display', font: { size: 12 } },
@@ -660,7 +686,7 @@
 
             const layout = {
                 title: {
-                    text: 'blue: unipolar, cyan: reference',
+                    text: 'cyan: reference, magenta: original, blue: QRS-subtracted',
                     font: { size: 12 }
                 },
                 xaxis: {
