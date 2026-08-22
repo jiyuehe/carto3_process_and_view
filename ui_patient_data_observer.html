@@ -303,13 +303,6 @@
                 z: [inactivePosns.map(p => p[2])],
                 'marker.color': [inactiveColors]
             }, [3]);
-            Plotly.restyle(plot, {
-                x: [otherPosns.map(p => p[0])],
-                y: [otherPosns.map(p => p[1])],
-                z: [otherPosns.map(p => p[2])],
-                'marker.color': [otherColors]
-            }, [4]);
-
             // update other-segments electrodes (all electrodes except current segment)
             const currLen = electrodePositions.length;
             let startIndex = 0;
@@ -492,7 +485,15 @@
                 layout.scene.camera = mesh_and_electrode.layout.scene.camera;
             }
 
-            Plotly.newPlot('mesh_and_electrode', [atriumTrace, meshEdgeTrace, electrodeActiveTrace, electrodeInactiveTrace, otherSegmentsTrace, electrodeLabelTrace], layout, {
+            Plotly.newPlot('mesh_and_electrode', [
+                atriumTrace,
+                meshEdgeTrace,
+                electrodeActiveTrace,
+                electrodeInactiveTrace,
+                otherSegmentsTrace,
+                electrodeLabelTrace,
+                activationColorbarTrace
+            ], layout, {
                 responsive: true
             });
         }

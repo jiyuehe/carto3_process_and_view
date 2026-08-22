@@ -45,6 +45,7 @@ for seg_idx, seg in enumerate(segment_positions):
 catheter['mapping_electrogram_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_electrogram_unipolar']) if idx not in segment_id_to_delete]
 catheter['surface_electrogram'] = [seg for idx, seg in enumerate(catheter['surface_electrogram']) if idx not in segment_id_to_delete]
 catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
+catheter['reference_electrogram'] = [seg for idx, seg in enumerate(catheter['reference_electrogram']) if idx not in segment_id_to_delete]
 
 mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
 surface_electrogram = catheter['surface_electrogram']

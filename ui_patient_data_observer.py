@@ -14,9 +14,9 @@
 
 #%%
 import numpy as np
-from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import cKDTree
 from flask import Flask, render_template, jsonify, request
+import hashlib
 import webbrowser
 import threading
 import subprocess
@@ -83,11 +83,18 @@ data_store = {
 # Geometry-dependent projection is cached because it does not change when
 # activation times are edited.
 interpolation_cache = directory['result'] / f'{name_prefix}_mesh_interpolation.npz'
+projection_hasher = hashlib.sha256()
+for projection_input in (
+        data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions_all']):
+    projection_input = np.ascontiguousarray(projection_input)
+    projection_hasher.update(projection_input.dtype.str.encode())
+    projection_hasher.update(str(projection_input.shape).encode())
+    projection_hasher.update(projection_input.view(np.uint8))
+projection_signature = projection_hasher.hexdigest()
 try:
     cached = np.load(interpolation_cache)
-    if (int(cached['algorithm_version']) != 2 or
-            cached['mesh_shape'].tolist() != list(data_store['mesh_vertex'].shape) or
-            cached['electrode_shape'].tolist() != list(data_store['electrode_positions_all'].shape)):
+    if (int(cached['algorithm_version']) != 3 or
+            str(cached['projection_signature'].item()) != projection_signature):
         raise ValueError('stale interpolation cache')
     projected_electrodes = cached['projected_electrodes']
     projection_faces = cached['projection_faces']
@@ -99,7 +106,8 @@ except (OSError, KeyError, ValueError):
     )
     np.savez_compressed(
         interpolation_cache,
-        algorithm_version=2,
+        algorithm_version=3,
+        projection_signature=projection_signature,
         mesh_shape=data_store['mesh_vertex'].shape,
         electrode_shape=data_store['electrode_positions_all'].shape,
         projected_electrodes=projected_electrodes,
@@ -112,47 +120,12 @@ data_store.update({
 })
 
 INTERPOLATION_DISTANCE_MM = 10.0
-
-
-def _build_linear_interpolator(sample_points, sample_values):
-    """Return a true linear interpolator with a local affine extrapolation fallback."""
-    sample_points = np.asarray(sample_points, dtype=np.float64)
-    sample_values = np.asarray(sample_values, dtype=np.float64)
-
-    def predictor(query_points):
-        query_points = np.asarray(query_points, dtype=np.float64)
-        if query_points.ndim == 1:
-            query_points = query_points[None, :]
-        if len(query_points) == 0:
-            return np.empty((0,), dtype=np.float64)
-        if len(sample_points) == 1:
-            return np.full(len(query_points), sample_values[0], dtype=np.float64)
-
-        interpolator = LinearNDInterpolator(sample_points, sample_values, fill_value=np.nan)
-        predicted = interpolator(query_points)
-        nan_mask = ~np.isfinite(predicted)
-        if not np.any(nan_mask):
-            return predicted
-
-        tree = cKDTree(sample_points)
-        k = min(8, len(sample_points))
-        _, neighbor_indices = tree.query(query_points[nan_mask], k=k)
-        neighbor_indices = np.asarray(neighbor_indices, dtype=int)
-
-        for row_idx, q in enumerate(query_points[nan_mask]):
-            idx = neighbor_indices[row_idx]
-            local_points = sample_points[idx]
-            local_values = sample_values[idx]
-            design = np.hstack([local_points, np.ones((len(local_points), 1))])
-            coeffs, *_ = np.linalg.lstsq(design, local_values, rcond=None)
-            predicted[np.flatnonzero(nan_mask)[row_idx]] = np.dot(np.hstack([q, 1.0]), coeffs)
-        return predicted
-
-    return predictor
+INTERPOLATION_NEIGHBORS = 8
+INTERPOLATION_POWER = 2.0
 
 
 def interpolate_activation_to_mesh(activation):
-    """Interpolate within INTERPOLATION_DISTANCE_MM of valid projected electrodes; leave the rest gray."""
+    """Locally interpolate projected electrodes without extrapolating beyond their value range."""
     activation = np.asarray(activation, dtype=np.float64)
     valid = np.isfinite(activation) & (activation != 0)
     if not np.any(valid):
@@ -171,19 +144,33 @@ def interpolate_activation_to_mesh(activation):
         sample_points = unique_points
 
     mesh_vertices = data_store['mesh_vertex']
-    nearest_distance, _ = cKDTree(sample_points).query(mesh_vertices, k=1)
-    within_threshold = nearest_distance <= INTERPOLATION_DISTANCE_MM
     mesh_activation = np.full(len(mesh_vertices), np.nan)
+    neighbor_count = min(INTERPOLATION_NEIGHBORS, len(sample_points))
+    distances, neighbor_indices = cKDTree(sample_points).query(
+        mesh_vertices,
+        k=neighbor_count,
+        distance_upper_bound=INTERPOLATION_DISTANCE_MM,
+    )
+    if neighbor_count == 1:
+        distances = distances[:, None]
+        neighbor_indices = neighbor_indices[:, None]
+
+    within_threshold = np.isfinite(distances[:, 0])
     if not np.any(within_threshold):
         return mesh_activation
 
-    if len(sample_points) == 1:
-        mesh_activation[within_threshold] = sample_values[0]
-        return mesh_activation
-
-    interpolator = _build_linear_interpolator(sample_points, sample_values)
-    predicted = interpolator(mesh_vertices[within_threshold])
-    mesh_activation[within_threshold] = predicted
+    local_distances = distances[within_threshold]
+    local_indices = neighbor_indices[within_threshold]
+    available = np.isfinite(local_distances)
+    safe_indices = np.where(available, local_indices, 0)
+    weights = np.where(
+        available,
+        1.0 / np.maximum(local_distances, np.finfo(float).eps) ** INTERPOLATION_POWER,
+        0.0,
+    )
+    weighted_values = weights * sample_values[safe_indices]
+    predicted = weighted_values.sum(axis=1) / weights.sum(axis=1)
+    mesh_activation[within_threshold] = np.clip(predicted, sample_values.min(), sample_values.max())
     return mesh_activation
 
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
@@ -261,7 +248,9 @@ def interpolate_activation():
         if activation.shape != expected_shape:
             return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
 
-        activation_all = np.asarray(data_store['activation_uni'], dtype=float).reshape(-1)
+        activation_all = np.asarray(data_store['activation_uni'], dtype=float).copy()
+        activation_all[segment_id] = activation
+        activation_all = activation_all.reshape(-1)
         mesh_activation = interpolate_activation_to_mesh(activation_all)
     return jsonify(utility.ui_functions.json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
