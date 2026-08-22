@@ -16,6 +16,8 @@
 import numpy as np
 from scipy.interpolate import griddata
 from flask import Flask, render_template, jsonify, request
+import os
+import tempfile
 import webbrowser
 import threading
 import subprocess
@@ -83,6 +85,104 @@ data_store = {
     'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
     'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
 }
+
+save_lock = threading.Lock()
+
+
+def validate_activation_updates(payload):
+    """Validate a batch of edited segments without changing server state."""
+    updates = payload.get('segments')
+    if not isinstance(updates, list) or not updates:
+        raise ValueError('segments must be a non-empty list')
+
+    validated = []
+    seen_segment_ids = set()
+    woi_start = data_store['clinical_electrogram_woi_start']
+    woi_end = data_store['clinical_electrogram_woi_end']
+
+    for update_index, update in enumerate(updates):
+        if not isinstance(update, dict):
+            raise ValueError(f'segments[{update_index}] must be an object')
+
+        segment_id = update.get('segment_id')
+        if isinstance(segment_id, bool) or not isinstance(segment_id, int):
+            raise ValueError(f'segments[{update_index}].segment_id must be an integer')
+        if segment_id < 0 or segment_id >= data_store['segment_count']:
+            raise ValueError(f'segment_id {segment_id} is out-of-range')
+        if segment_id in seen_segment_ids:
+            raise ValueError(f'segment_id {segment_id} appears more than once')
+        seen_segment_ids.add(segment_id)
+
+        raw_activation = update.get('activation_uni')
+        try:
+            activation = np.asarray(raw_activation, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'activation_uni for segment {segment_id} must contain only numbers'
+            ) from exc
+
+        expected_length = len(data_store['electrode_positions'][segment_id])
+        if activation.ndim != 1 or activation.shape[0] != expected_length:
+            raise ValueError(
+                f'activation_uni for segment {segment_id} must have length {expected_length}'
+            )
+        if not np.all(np.isfinite(activation)):
+            raise ValueError(f'activation_uni for segment {segment_id} contains a non-finite value')
+        if not np.all(activation == np.trunc(activation)):
+            raise ValueError(f'activation_uni for segment {segment_id} must contain integers')
+
+        outside_woi = (activation != 0) & (
+            (activation < woi_start) | (activation > woi_end)
+        )
+        if np.any(outside_woi):
+            raise ValueError(
+                f'activation_uni for segment {segment_id} must be 0 or within '
+                f'the window of interest [{woi_start}, {woi_end}]'
+            )
+
+        validated.append((segment_id, activation.astype(np.int64)))
+
+    return validated
+
+
+def updated_activation_array(source, updates):
+    """Return a detached activation array containing the validated updates."""
+    segments = [np.asarray(source[index]).copy() for index in range(len(source))]
+    for segment_id, activation in updates:
+        segments[segment_id] = activation
+
+    if isinstance(source, np.ndarray) and source.ndim > 1:
+        result = np.empty(source.shape, dtype=source.dtype)
+        for segment_id, activation in enumerate(segments):
+            result[segment_id] = activation
+        return result
+
+    result = np.empty(len(segments), dtype=object)
+    for segment_id, activation in enumerate(segments):
+        result[segment_id] = activation
+    return result
+
+
+def atomic_savez(save_path, values):
+    """Write an NPZ beside its destination and atomically replace the old file."""
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        prefix=f'.{save_path.name}.', suffix='.tmp', dir=save_path.parent
+    )
+    try:
+        if save_path.exists():
+            os.fchmod(file_descriptor, save_path.stat().st_mode & 0o7777)
+        with os.fdopen(file_descriptor, 'wb') as temporary_file:
+            np.savez(temporary_file, **values)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, save_path)
+    except Exception:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+
 
 def interpolate_activation_to_mesh(activation):
     """Linearly interpolate valid projected electrode values in 3-D."""
@@ -188,21 +288,38 @@ def interpolate_activation():
 @app.route('/api/save', methods=['POST'])
 def save_activation_times():
     payload = request.get_json(silent=True) or {}
-    segment_id = int(payload.get('segment_id', 0))
-    activation_uni = payload.get('activation_uni')
+    try:
+        updates = validate_activation_updates(payload)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
-    if segment_id < 0 or segment_id >= data_store['segment_count']:
-        return jsonify({'error': 'segment_id is out-of-range'}), 400
+    activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
+    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_catheter.npz"
 
-    activation_uni = np.asarray(activation_uni, dtype=int)
-    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_clinical.npz"
+    with save_lock:
+        clinical_data = data_store['clinical_data']
+        updated_activation = updated_activation_array(clinical_data[activation_key], updates)
+        data_to_save = dict(clinical_data)
+        data_to_save[activation_key] = updated_activation
 
-    clinical_data = data_store['clinical_data']
-    clinical_data['mapping_electrogram_unipolar_activation_within_woi'][segment_id] = activation_uni
-    np.savez(save_path, **clinical_data)
-    print(f"Saved updated activation times for segment {segment_id} to {save_path}")
+        try:
+            atomic_savez(save_path, data_to_save)
+        except Exception:
+            app.logger.exception('Failed to save activation times to %s', save_path)
+            return jsonify({'error': 'Unable to write the catheter data file'}), 500
 
-    return jsonify({'status': 'ok', 'path': str(save_path), 'segment_id': segment_id})
+        # Commit the new values to server memory only after the file replacement succeeds.
+        clinical_data[activation_key] = updated_activation
+        data_store['activation_uni'] = updated_activation
+
+    saved_segment_ids = [segment_id for segment_id, _ in updates]
+    print(f"Saved activation times for segments {saved_segment_ids} to {save_path}")
+    return jsonify({
+        'status': 'ok',
+        'path': str(save_path),
+        'saved_segment_ids': saved_segment_ids,
+        'saved_segment_count': len(saved_segment_ids),
+    })
 
 #%%
 if __name__ == '__main__':

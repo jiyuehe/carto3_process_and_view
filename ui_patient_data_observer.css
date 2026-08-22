@@ -141,6 +141,24 @@ button:disabled {
     font-size: 12px;
 }
 
+.save-status {
+    min-width: 120px;
+    font-size: 12px;
+    text-align: left;
+}
+
+.save-status-pending {
+    color: #666;
+}
+
+.save-status-success {
+    color: #247a35;
+}
+
+.save-status-error {
+    color: #b42318;
+}
+
 .save-progress-track {
     width: 80px;
     height: 6px;

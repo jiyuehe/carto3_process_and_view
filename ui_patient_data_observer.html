@@ -26,11 +26,12 @@
                     <span class="toggle-slider"></span>
                     <span class="toggle-text">Latest</span>
                 </label>
-                <button id="btnSave">Save</button>
+                <button id="btnSave" disabled>Save</button>
                 <div id="saveProgress" class="save-progress" role="status" aria-live="polite" hidden>
-                    <span>Saving…</span>
+                    <span>Saving all edited segments…</span>
                     <span class="save-progress-track"><span class="save-progress-bar"></span></span>
                 </div>
+                <span id="saveStatus" class="save-status" role="status" aria-live="polite"></span>
                 <label class="toggle-switch">
                     <input type="checkbox" id="toggleFullHue" checked>
                     <span class="toggle-slider"></span>
@@ -66,6 +67,40 @@
         let currentSegmentIndex = 0;
         let electrogramRequestId = 0;
         let interpolationRequestId = 0;
+        const editedSegmentIds = new Set();
+        let isSaving = false;
+
+        function setSaveStatus(message, type = '') {
+            const status = document.getElementById('saveStatus');
+            status.textContent = message;
+            status.className = `save-status${type ? ` save-status-${type}` : ''}`;
+        }
+
+        function updateSaveButton() {
+            const saveButton = document.getElementById('btnSave');
+            const editCount = editedSegmentIds.size;
+            saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
+            saveButton.disabled = !appData || isSaving || editCount === 0;
+        }
+
+        function setSavingState(saving) {
+            isSaving = saving;
+            document.getElementById('saveProgress').hidden = !saving;
+            document.querySelectorAll('.activation-input').forEach(input => {
+                input.disabled = saving;
+            });
+            document.getElementById('toggleEarliest').disabled = saving;
+            document.getElementById('toggleLatest').disabled = saving;
+
+            if (saving) {
+                setSliderEnabled(false);
+            } else {
+                const sortedView = document.getElementById('toggleEarliest').checked
+                    || document.getElementById('toggleLatest').checked;
+                setSliderEnabled(!sortedView);
+            }
+            updateSaveButton();
+        }
 
         function getCurrentSegmentPositions() {
             if (!appData || !Array.isArray(appData.electrode_positions)) return [];
@@ -117,6 +152,7 @@
             initializeSlider();
             render3DPlot();
             renderElectrogram();
+            updateSaveButton();
         }
 
         async function fetchElectrogramData(segmentId) {
@@ -478,6 +514,7 @@
             const container = document.getElementById('inputs_activation_times');
             container.innerHTML = '';
 
+            const renderedSegmentId = currentSegmentIndex;
             const activation = getCurrentActivation();
             for (let i = electrodeIds.length - 1; i >= 0; i--) {
                 const eId = electrodeIds[i];
@@ -490,16 +527,30 @@
 
                 const uniInput = document.createElement('input');
                 uniInput.type = 'number';
+                uniInput.step = '1';
                 uniInput.className = 'activation-input';
                 uniInput.value = activation[eId] !== 0 && Number.isFinite(activation[eId]) ? activation[eId] : '';
                 uniInput.placeholder = '-';
                 uniInput.dataset.electrodeId = eId;
+                uniInput.disabled = isSaving;
+
+                uniInput.addEventListener('input', (e) => {
+                    const electrodeId = parseInt(e.target.dataset.electrodeId);
+                    const rawValue = e.target.value;
+                    const newValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
+                    appData.activation_uni[renderedSegmentId][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+                    editedSegmentIds.add(renderedSegmentId);
+                    setSaveStatus('Unsaved changes', 'pending');
+                    updateSaveButton();
+                });
 
                 uniInput.addEventListener('change', (e) => {
                     const electrodeId = parseInt(e.target.dataset.electrodeId);
                     const rawValue = e.target.value;
                     const newValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
-                    appData.activation_uni[currentSegmentIndex][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+                    appData.activation_uni[renderedSegmentId][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+                    editedSegmentIds.add(renderedSegmentId);
+                    updateSaveButton();
 
                     const fullSegmentIds = Array.from({ length: getCurrentSegmentPositions().length }, (_, i) => i);
                     document.getElementById('toggleEarliest').checked = false;
@@ -854,43 +905,51 @@
         });
 
         document.getElementById('btnSave').addEventListener('click', async () => {
-            if (!appData) return;
+            if (!appData || isSaving || editedSegmentIds.size === 0) return;
 
-            const fullSegmentLength = getCurrentSegmentPositions().length;
-            const segmentValues = Array.from({ length: fullSegmentLength }, (_, i) => {
-                const input = document.querySelector(`.activation-input[data-electrode-id="${i}"]`);
-                const rawValue = input ? input.value : appData.activation_uni[currentSegmentIndex][i];
-                const numericValue = rawValue === '' || rawValue === null || rawValue === undefined
-                    ? 0
-                    : Number.parseFloat(rawValue);
-                return Number.isFinite(numericValue) ? numericValue : 0;
-            });
-            appData.activation_uni[currentSegmentIndex] = segmentValues;
+            const segmentIdsToSave = Array.from(editedSegmentIds).sort((a, b) => a - b);
+            const segments = segmentIdsToSave.map(segmentId => ({
+                segment_id: segmentId,
+                activation_uni: appData.activation_uni[segmentId]
+            }));
 
-            const saveButton = document.getElementById('btnSave');
-            const saveProgress = document.getElementById('saveProgress');
-            saveButton.disabled = true;
-            saveProgress.hidden = false;
+            setSaveStatus('');
+            setSavingState(true);
 
             try {
                 const response = await fetch('/api/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        segment_id: currentSegmentIndex,
-                        activation_uni: appData.activation_uni[currentSegmentIndex]
-                    })
+                    body: JSON.stringify({ segments })
                 });
-                const result = await response.json();
+                const responseText = await response.text();
+                let result = {};
+                if (responseText) {
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (_error) {
+                        result = { error: `Server returned an invalid response (HTTP ${response.status})` };
+                    }
+                }
                 if (!response.ok || result.status !== 'ok') {
                     throw new Error(result.error || `HTTP ${response.status}`);
                 }
+                segmentIdsToSave.forEach(segmentId => editedSegmentIds.delete(segmentId));
+                const count = result.saved_segment_count ?? segmentIdsToSave.length;
+                setSaveStatus(`Saved ${count} edited segment${count === 1 ? '' : 's'}.`, 'success');
             } catch (err) {
                 console.error('Failed to save activation times:', err);
+                setSaveStatus(`Save failed: ${err.message}`, 'error');
                 alert(`Failed to save activation times: ${err.message}`);
             } finally {
-                saveProgress.hidden = true;
-                saveButton.disabled = false;
+                setSavingState(false);
+            }
+        });
+
+        window.addEventListener('beforeunload', (event) => {
+            if (editedSegmentIds.size > 0) {
+                event.preventDefault();
+                event.returnValue = '';
             }
         });
 
