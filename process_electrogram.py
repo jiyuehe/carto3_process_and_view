@@ -508,8 +508,8 @@ for n in range(n_segment):
 #%%
 # grab activations within a window of interest (WOI) around the 2000 ms mark for each recording segment
 half_window_size_of_woi = 350//2 # number of time points before and after the 2000 ms mark
-t_start = 2000 - half_window_size_of_woi # window of interest start time index
-t_end = 2000 + half_window_size_of_woi # window of interest end time index
+t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
+t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
 
 catheter['clinical_electrogram_woi_start'] = t_start
 catheter['clinical_electrogram_woi_end'] = t_end
