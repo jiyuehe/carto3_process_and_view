@@ -619,55 +619,18 @@ for n in range(n_segment):
         plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
         plt.close()
 
-#%%
-# grab activations within a window of interest (WOI) around the 2000 ms mark for each recording segment
-half_window_size_of_woi = 350//2 # number of time points before and after the 2000 ms mark
-t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
-t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
-
-catheter['clinical_electrogram_woi_start'] = t_start
-catheter['clinical_electrogram_woi_end'] = t_end
-
-mapping_electrogram_unipolar_activation_within_woi = [None for _ in range(n_segment)]
-activation_time_edge_buffer = 10 # remove activation near the two ends of the window of interest
-for n in range(n_segment): # range(n_segment) or [some segment indices for debugging]
-    print(f'recording segment id {n} in [0, {n_segment-1}]')
-
-    activation_times_unipolar_refined = mapping_electrogram_unipolar_activation[n]
-    if activation_times_unipolar_refined is None:
-        activation_times_unipolar_refined = [np.array([], dtype=int) for _ in range(n_channels)]
-
-    activation_times_within_woi = np.zeros((len(activation_times_unipolar_refined),), dtype=object)
-    for channel_idx in range(len(activation_times_unipolar_refined)):
-        activation_times = activation_times_unipolar_refined[channel_idx]
-        if activation_times is not None and np.ptp(mapping_electrogram_unipolar_qrs_subtracted[channel_idx][t_start:t_end]) >= 0.1:
-            temp = activation_times[(activation_times >= t_start+activation_time_edge_buffer) & (activation_times <= t_end-activation_time_edge_buffer)]
-            if len(temp) != 0:
-                activation_times_within_woi[channel_idx] = temp[0]
-
-    mapping_electrogram_unipolar_activation_within_woi[n] = activation_times_within_woi
-
-catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
-catheter['mapping_electrogram_unipolar_activation_within_woi'] = mapping_electrogram_unipolar_activation_within_woi
-
 catheter['surface_ecg_sum'] = surface_ecg_sum
 catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
+catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 
-# convert sequence-like values to object arrays to avoid heterogeneous-shape errors
-catheter_to_save = {}
-for k, v in catheter.items():
-    # keep numpy arrays as-is, but coerce lists / sequences of arrays to object dtype
-    if isinstance(v, np.ndarray):
-        catheter_to_save[k] = v
-    else:
-        try:
-            catheter_to_save[k] = np.asarray(v, dtype=object)
-        except Exception:
-            # fallback: store original value as a single-object array
-            catheter_to_save[k] = np.asarray([v], dtype=object)
+#%%
+# grab activations within window of interest
+half_window_size_of_woi = 400//2
+t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
+t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
+catheter = utility.ui_functions.grab_activations_within_window_of_interest(catheter,t_start,t_end)
 
-# allow_pickle=True ensures object arrays are saved correctly
 file_path = directory['data'] / f'{name_prefix}_catheter.npz'
-np.savez(file_path, **catheter_to_save, allow_pickle=True)
+np.savez(file_path, **catheter)
 
 print('done')
