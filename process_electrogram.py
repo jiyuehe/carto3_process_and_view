@@ -19,16 +19,19 @@ import matplotlib.pyplot as plt
 import utility
 import configuration
 
+import plotly.graph_objects as go
+import plotly.io as pio
+pio.renderers.default = 'browser'
+
 #%%
 # setting
 directory = configuration.directory_setup()
 name_prefix = configuration.map_name()
 
-# load data
+# load electrogram recording data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
 carto = {k: data[k] for k in data.files}
 
-#%%
 # recording segments data
 catheter = carto['catheter'].item()
 mapping_name_unipolar = catheter['mapping_name_unipolar']
@@ -48,7 +51,6 @@ catheter['surface_electrogram'] = [seg for idx, seg in enumerate(catheter['surfa
 catheter['reference_electrogram'] = [seg for idx, seg in enumerate(catheter['reference_electrogram']) if idx not in segment_id_to_delete]
 catheter['reference_name'] = [seg for idx, seg in enumerate(catheter['reference_name']) if idx not in segment_id_to_delete]
 
-#%%
 debug_plot = 0
 if debug_plot: # plot the recordings of each segment
     recording_groups = (
@@ -92,13 +94,67 @@ if debug_plot: # plot the recordings of each segment
         plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
         plt.close(fig)
 
+#%%
+# project electrode positions onto the mesh surface
+data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
+mesh = {k: data[k] for k in data.files} # load mesh data
+
+vertex = mesh['geometry_original_vertex']
+face = mesh['geometry_original_face']
+
+electrode_positions = []
+electrode_positions_on_mesh = []
+for n in range(len(catheter['mapping_position_unipolar'])):
+    print(f'project electrode to mesh {n} in [0, {len(catheter['mapping_position_unipolar'])-1}]')
+
+    positions = catheter['mapping_position_unipolar'][n]
+    electrode_positions.append(positions)
+
+    projected_positions, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, positions)
+    electrode_positions_on_mesh.append(projected_positions)
+
+# save the variable
+mesh['electrode_positions'] = electrode_positions
+mesh['electrode_positions_on_mesh'] = electrode_positions_on_mesh
+file_path = directory['data'] / f'{name_prefix}_mesh.npz'
+np.savez(file_path, **mesh, allow_pickle=True)
+
+debug_plot = 0
+if debug_plot == 1: # plot the electrode positions on the mesh surface
+    fig = go.Figure()
+    fig.add_trace(go.Mesh3d(
+        x=vertex[:, 0], y=vertex[:, 1], z=vertex[:, 2],
+        i=face[:, 0], j=face[:, 1], k=face[:, 2],
+        color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
+    ))
+    for n in range(len(electrode_positions_on_mesh)):
+        p = electrode_positions[n]
+        fig.add_trace(go.Scatter3d(
+            x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+            marker=dict(size=4, color='red'), name='Original electrodes',
+            legendgroup='original', showlegend=(n == 0)
+        ))
+        p = electrode_positions_on_mesh[n]
+        fig.add_trace(go.Scatter3d(
+            x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+            marker=dict(size=4, color='blue'), name='Projected electrodes',
+            legendgroup='projected', showlegend=(n == 0)
+        ))
+    fig.update_layout(
+        title='Electrode positions projected onto mesh surface',
+        scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    fig.show()
+
+#%%
+# loop through each recording segment
 mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
 surface_electrogram = catheter['surface_electrogram']
-
-# loop through each recording segment
 n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording segments
 mapping_electrogram_unipolar_activation = [None for _ in range(n_segment)]
 mapping_electrogram_unipolar_qrs_subtracted = [None for _ in range(n_segment)]
+surface_ecg_sum = [None for _ in range(n_segment)]
 for n in range(n_segment):
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
@@ -115,6 +171,8 @@ for n in range(n_segment):
     smooth_window = 30
     smooth_kernel = np.ones(smooth_window) / smooth_window
     surface_signal_smooth = np.convolve(surface_signal_sum, smooth_kernel, mode='same')
+
+    surface_ecg_sum[n] = surface_signal_smooth / np.ptp(surface_signal_smooth)
 
     # find the QRS timings
     min_qrs_spacing = 300 # ms
@@ -581,6 +639,7 @@ for n in range(n_segment): # range(n_segment) or [some segment indices for debug
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 catheter['mapping_electrogram_unipolar_activation_within_woi'] = mapping_electrogram_unipolar_activation_within_woi
 
+catheter['surface_ecg_sum'] = surface_ecg_sum
 catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
 
 # convert sequence-like values to object arrays to avoid heterogeneous-shape errors

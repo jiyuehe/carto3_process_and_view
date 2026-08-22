@@ -14,9 +14,8 @@
 
 #%%
 import numpy as np
-from scipy.spatial import cKDTree
+from scipy.interpolate import griddata
 from flask import Flask, render_template, jsonify, request
-import hashlib
 import webbrowser
 import threading
 import subprocess
@@ -43,21 +42,25 @@ catheter = {
 }
 
 # variable to store data
-segment_positions = np.asarray(catheter.get('mapping_position_unipolar', []), dtype=object) # shape is (n_segments,)
-segment_count = len(segment_positions)
-segment_electrode_count = int(segment_positions[0].shape[0])
+electrode_positions = np.asarray(mesh['electrode_positions'], dtype=object) # shape is (n_segments,)
+electrode_positions_on_mesh = np.asarray(mesh['electrode_positions_on_mesh'], dtype=object) # shape is (n_segments,)
+segment_count = len(electrode_positions)
+segment_electrode_count = int(electrode_positions[0].shape[0])
 egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
 egm_uni_qrs_subtracted = np.asarray(catheter.get('mapping_electrogram_unipolar_qrs_subtracted', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
-egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object) # shape is (n_segments, n_samples)
+egm_ref = np.asarray(catheter.get('surface_ecg_sum', []), dtype=object) # shape is (n_segments, n_samples)
 activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', []), dtype=object) # shape is (n_segments, n_electrodes)
 
 #%%
-# grab all electrode positions across all segments
-flattened = []
-for seg in segment_positions:
-    arr = np.asarray(seg, dtype=float).reshape(-1, 3)
-    flattened.append(arr)
-electrode_positions_all = np.vstack(flattened)
+# grab all pre-computed electrode positions across all segments
+electrode_positions_all = np.vstack([
+    np.asarray(segment, dtype=float).reshape(-1, 3)
+    for segment in electrode_positions
+])
+electrode_positions_on_mesh_all = np.vstack([
+    np.asarray(segment, dtype=float).reshape(-1, 3)
+    for segment in electrode_positions_on_mesh
+])
 
 data_store = {
     'directory': directory,
@@ -67,11 +70,12 @@ data_store = {
     'mesh_vertex': mesh['geometry_original_vertex'],
     'mesh_face': mesh['geometry_original_face'],
     'mesh_edge': mesh['geometry_original_edge'],
-    'segment_positions': segment_positions,
     'segment_count': segment_count,
     'segment_electrode_count': segment_electrode_count,
-    'electrode_positions': segment_positions[0],
+    'electrode_positions': electrode_positions,
     'electrode_positions_all': electrode_positions_all,
+    'electrode_positions_on_mesh': electrode_positions_on_mesh,
+    'electrode_positions_on_mesh_all': electrode_positions_on_mesh_all,
     'egm_uni_original': egm_uni_original,
     'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
     'egm_ref': egm_ref,
@@ -80,98 +84,19 @@ data_store = {
     'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
 }
 
-# Geometry-dependent projection is cached because it does not change when
-# activation times are edited.
-interpolation_cache = directory['result'] / f'{name_prefix}_mesh_interpolation.npz'
-projection_hasher = hashlib.sha256()
-for projection_input in (
-        data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions_all']):
-    projection_input = np.ascontiguousarray(projection_input)
-    projection_hasher.update(projection_input.dtype.str.encode())
-    projection_hasher.update(str(projection_input.shape).encode())
-    projection_hasher.update(projection_input.view(np.uint8))
-projection_signature = projection_hasher.hexdigest()
-try:
-    cached = np.load(interpolation_cache)
-    if (int(cached['algorithm_version']) != 3 or
-            str(cached['projection_signature'].item()) != projection_signature):
-        raise ValueError('stale interpolation cache')
-    projected_electrodes = cached['projected_electrodes']
-    projection_faces = cached['projection_faces']
-except (OSError, KeyError, ValueError):
-    projected_electrodes, projection_faces = (
-        utility.ui_functions.project_electrodes_to_mesh(
-            data_store['mesh_vertex'], data_store['mesh_face'], data_store['electrode_positions_all']
-        )
-    )
-    np.savez_compressed(
-        interpolation_cache,
-        algorithm_version=3,
-        projection_signature=projection_signature,
-        mesh_shape=data_store['mesh_vertex'].shape,
-        electrode_shape=data_store['electrode_positions_all'].shape,
-        projected_electrodes=projected_electrodes,
-        projection_faces=projection_faces,
-    )
-
-data_store.update({
-    'projected_electrodes': projected_electrodes,
-    'projection_faces': projection_faces,
-})
-
-INTERPOLATION_DISTANCE_MM = 10.0
-INTERPOLATION_NEIGHBORS = 8
-INTERPOLATION_POWER = 2.0
-
-
 def interpolate_activation_to_mesh(activation):
-    """Locally interpolate projected electrodes without extrapolating beyond their value range."""
+    """Linearly interpolate valid projected electrode values in 3-D."""
     activation = np.asarray(activation, dtype=np.float64)
-    valid = np.isfinite(activation) & (activation != 0)
+    sample_points = np.asarray(
+        data_store['electrode_positions_on_mesh_all'], dtype=np.float64
+    )
+    valid = np.isfinite(activation) & (activation != 0) & np.all(
+        np.isfinite(sample_points), axis=1
+    )
     if not np.any(valid):
         return np.full(len(data_store['mesh_vertex']), np.nan)
 
-    sample_points = data_store['projected_electrodes'][valid]
-    sample_values = activation[valid]
-
-    # Coincident projected locations make the local interpolation system singular.
-    # Combine them using their mean activation before fitting.
-    unique_points, inverse = np.unique(sample_points, axis=0, return_inverse=True)
-    if len(unique_points) != len(sample_points):
-        sums = np.bincount(inverse, weights=sample_values)
-        counts = np.bincount(inverse)
-        sample_values = sums / counts
-        sample_points = unique_points
-
-    mesh_vertices = data_store['mesh_vertex']
-    mesh_activation = np.full(len(mesh_vertices), np.nan)
-    neighbor_count = min(INTERPOLATION_NEIGHBORS, len(sample_points))
-    distances, neighbor_indices = cKDTree(sample_points).query(
-        mesh_vertices,
-        k=neighbor_count,
-        distance_upper_bound=INTERPOLATION_DISTANCE_MM,
-    )
-    if neighbor_count == 1:
-        distances = distances[:, None]
-        neighbor_indices = neighbor_indices[:, None]
-
-    within_threshold = np.isfinite(distances[:, 0])
-    if not np.any(within_threshold):
-        return mesh_activation
-
-    local_distances = distances[within_threshold]
-    local_indices = neighbor_indices[within_threshold]
-    available = np.isfinite(local_distances)
-    safe_indices = np.where(available, local_indices, 0)
-    weights = np.where(
-        available,
-        1.0 / np.maximum(local_distances, np.finfo(float).eps) ** INTERPOLATION_POWER,
-        0.0,
-    )
-    weighted_values = weights * sample_values[safe_indices]
-    predicted = weighted_values.sum(axis=1) / weights.sum(axis=1)
-    mesh_activation[within_threshold] = np.clip(predicted, sample_values.min(), sample_values.max())
-    return mesh_activation
+    return griddata(sample_points[valid], activation[valid], data_store['mesh_vertex'], method='linear')
 
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
 @app.route('/')
@@ -187,8 +112,11 @@ def get_data():
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
         'mesh_edge': data_store['mesh_edge'].tolist(),
-        'segment_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['segment_positions']],
-        'electrode_positions': np.asarray(data_store['electrode_positions'], dtype=float).tolist(),
+        'electrode_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['electrode_positions']],
+        'electrode_positions_on_mesh': [
+            np.asarray(seg, dtype=float).tolist()
+            for seg in data_store['electrode_positions_on_mesh']
+        ],
         'mesh_activation': [None] * len(data_store['mesh_vertex']),
         'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),

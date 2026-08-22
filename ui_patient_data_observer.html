@@ -68,14 +68,14 @@
         let interpolationRequestId = 0;
 
         function getCurrentSegmentPositions() {
-            if (!appData || !Array.isArray(appData.segment_positions)) return [];
-            return appData.segment_positions[currentSegmentIndex] || [];
+            if (!appData || !Array.isArray(appData.electrode_positions)) return [];
+            return appData.electrode_positions[currentSegmentIndex] || [];
         }
         function getAllSegmentPositions() {
-            if (!appData || !Array.isArray(appData.segment_positions)) return [];
+            if (!appData || !Array.isArray(appData.electrode_positions)) return [];
             const all = [];
             for (let s = 0; s < appData.segment_count; s++) {
-                const seg = appData.segment_positions[s] || [];
+                const seg = appData.electrode_positions[s] || [];
                 for (let i = 0; i < seg.length; i++) all.push(seg[i]);
             }
             return all;
@@ -90,7 +90,7 @@
             if (!appData || !Array.isArray(appData.activation_uni)) return [];
             const all = [];
             for (let s = 0; s < appData.segment_count; s++) {
-                const segPos = appData.segment_positions?.[s];
+                const segPos = appData.electrode_positions?.[s];
                 if (segPos === null || segPos === undefined || !Array.isArray(segPos) || segPos.length === 0) {
                     continue;
                 }
@@ -132,6 +132,38 @@
             return payload;
         }
 
+        function getActivationColor(norm, fullHue = document.getElementById('toggleFullHue').checked) {
+            const clampedNorm = Math.max(0, Math.min(1, norm));
+            const hue = fullHue ? clampedNorm : clampedNorm * (240.0 / 360.0);
+            const saturation = 0.9;
+            const value = 0.96;
+
+            const c = value * saturation;
+            const x = c * (1 - Math.abs(((hue * 6) % 2) - 1));
+            const m = value - c;
+
+            let r, g, b;
+            const h = hue * 6;
+            if (h < 1) {
+                [r, g, b] = [c, x, 0];
+            } else if (h < 2) {
+                [r, g, b] = [x, c, 0];
+            } else if (h < 3) {
+                [r, g, b] = [0, c, x];
+            } else if (h < 4) {
+                [r, g, b] = [0, x, c];
+            } else if (h < 5) {
+                [r, g, b] = [x, 0, c];
+            } else {
+                [r, g, b] = [c, 0, x];
+            }
+
+            r = Math.round((r + m) * 255);
+            g = Math.round((g + m) * 255);
+            b = Math.round((b + m) * 255);
+            return `rgb(${r},${g},${b})`;
+        }
+
         function computeColors(activation, rangeOverride = null) {
             const validActivations = activation.filter(a => a !== 0 && Number.isFinite(a));
             if (validActivations.length === 0) {
@@ -151,36 +183,7 @@
                     return 'rgba(80,80,80,0.1)';
                 }
 
-                const norm = (act - minVal) / span;
-                const hue = document.getElementById('toggleFullHue').checked ? norm : norm * (240.0 / 360.0);
-                const saturation = 0.9;
-                const value = 0.96;
-
-                const c = value * saturation;
-                const x = c * (1 - Math.abs(((hue * 6) % 2) - 1));
-                const m = value - c;
-
-                let r, g, b;
-                const h = hue * 6;
-                if (h < 1) {
-                    [r, g, b] = [c, x, 0];
-                } else if (h < 2) {
-                    [r, g, b] = [x, c, 0];
-                } else if (h < 3) {
-                    [r, g, b] = [0, c, x];
-                } else if (h < 4) {
-                    [r, g, b] = [0, x, c];
-                } else if (h < 5) {
-                    [r, g, b] = [x, 0, c];
-                } else {
-                    [r, g, b] = [c, 0, x];
-                }
-
-                r = Math.round((r + m) * 255);
-                g = Math.round((g + m) * 255);
-                b = Math.round((b + m) * 255);
-
-                return `rgba(${r},${g},${b},1)`;
+                return getActivationColor((act - minVal) / span);
             });
         }
 
@@ -197,14 +200,13 @@
         }
 
         function getActivationColorscale() {
-            return [
-                [0.0, 'rgb(70, 70, 75)'],
-                [0.15, 'rgb(70, 120, 180)'],
-                [0.35, 'rgb(80, 180, 120)'],
-                [0.55, 'rgb(220, 180, 60)'],
-                [0.75, 'rgb(235, 110, 30)'],
-                [1.0, 'rgb(185, 20, 20)']
-            ];
+            const fullHue = document.getElementById('toggleFullHue').checked;
+            // HSV is piecewise linear in RGB between hue-sector boundaries.
+            const sectorCount = fullHue ? 6 : 4;
+            return Array.from({ length: sectorCount + 1 }, (_, index) => {
+                const position = index / sectorCount;
+                return [position, getActivationColor(position, fullHue)];
+            });
         }
 
         function getMeshColorSettings(meshActivation, activationRange) {
@@ -306,7 +308,7 @@
             // update other-segments electrodes (all electrodes except current segment)
             const currLen = electrodePositions.length;
             let startIndex = 0;
-            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.segment_positions[s] || []).length;
+            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.electrode_positions[s] || []).length;
             const before = allElectrodePositions.slice(0, startIndex);
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
@@ -320,14 +322,6 @@
                 'marker.color': [otherColors]
             }, [4]);
 
-            // update activation colorbar trace
-            Plotly.restyle(plot, {
-                'marker.color': [[range.min, range.max]],
-                'marker.colorscale': [getActivationColorscale()],
-                'marker.cmin': range.min,
-                'marker.cmax': range.max,
-                'marker.showscale': false
-            }, [6]);
         }
 
         function render3DPlot(preserveCamera = false) {
@@ -409,7 +403,7 @@
             // other segments (not the currently selected segment)
             const currLen = electrodePositions.length;
             let startIndex = 0;
-            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.segment_positions[s] || []).length;
+            for (let s = 0; s < currentSegmentIndex; s++) startIndex += (appData.electrode_positions[s] || []).length;
             const before = allElectrodePositions.slice(0, startIndex);
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
@@ -439,26 +433,6 @@
                 textfont: { size: 16, color: '#000000', family: 'Arial Black, Arial, sans-serif' },
                 showlegend: false,
                 hoverinfo: 'none',
-            };
-
-            const activationColorbarTrace = {
-                type: 'scatter3d',
-                mode: 'markers',
-                x: [meshVertices[0][0], meshVertices[0][0]],
-                y: [meshVertices[0][1], meshVertices[0][1]],
-                z: [meshVertices[0][2], meshVertices[0][2]],
-                marker: {
-                    size: 0.1,
-                    opacity: 0,
-                    color: [activationRange.min, activationRange.max],
-                    colorscale: getActivationColorscale(),
-                    cmin: activationRange.min,
-                    cmax: activationRange.max,
-                    showscale: false,
-                    colorbar: { title: 'Activation' }
-                },
-                showlegend: false,
-                hoverinfo: 'none'
             };
 
             const layout = {
@@ -491,8 +465,7 @@
                 electrodeActiveTrace,
                 electrodeInactiveTrace,
                 otherSegmentsTrace,
-                electrodeLabelTrace,
-                activationColorbarTrace
+                electrodeLabelTrace
             ], layout, {
                 responsive: true
             });
@@ -826,7 +799,7 @@
             // map flattened index back to segment index
             let flat = chosen.idx;
             for (let s = 0; s < appData.segment_count; s++) {
-                const segLen = (appData.segment_positions[s] || []).length;
+                const segLen = (appData.electrode_positions[s] || []).length;
                 if (flat < segLen) return s;
                 flat -= segLen;
             }
@@ -875,9 +848,6 @@
             const plot = document.getElementById('mesh_and_electrode');
             const showMesh = e.target.checked;
             Plotly.restyle(plot, { visible: showMesh }, [0, 1]);
-            Plotly.restyle(plot, {
-                'marker.showscale': showMesh && getCurrentActivation().some(value => value !== 0)
-            }, [6]);
             if (showMesh) {
                 refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
             }
