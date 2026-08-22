@@ -55,11 +55,6 @@
                         <span class="toggle-slider"></span>
                         <span class="toggle-text">Interpolate to Mesh</span>
                     </label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="toggleUnipolar">
-                        <span class="toggle-slider"></span>
-                        <span class="toggle-text">Show Unipolar Electrogram</span>
-                    </label>
                 </div>
             </div>
         </div>
@@ -475,7 +470,7 @@
 
             const layout = {
                 title: {
-                    text: `${appData.name_prefix} • Segment ${currentSegmentIndex + 1}/${appData.segment_count}`,
+                    text: appData.name_prefix,
                     font: { size: 12 }
                 },
                 dragmode: 'orbit',
@@ -558,7 +553,6 @@
             }
 
             const requestId = ++electrogramRequestId;
-            const showUnipolar = document.getElementById('toggleUnipolar').checked;
             const activationUni = getCurrentActivation();
             const shiftSpacing = 4;
 
@@ -584,10 +578,8 @@
             }
 
             const egmUniData = electrogramData.egm_uni || [];
-            const egmBiData = electrogramData.egm_bi || [];
             const egmRefData = electrogramData.egm_ref || [];
             const traces = [];
-            const bipolarTraces = [];
             const yTickVals = [];
             const yTickText = [];
             let minY = Infinity;
@@ -596,19 +588,13 @@
             for (let i = 0; i < electrodeIds.length; i++) {
                 const eId = electrodeIds[i];
                 const egmUni = egmUniData[eId];
-                const egmBi = egmBiData[eId] || null;
                 if (!Array.isArray(egmUni) || egmUni.length === 0) {
                     continue;
                 }
 
                 const t = egmUni.map((_, idx) => idx);
                 const egmUniShifted = egmUni.map(val => val + i * shiftSpacing);
-                const egmBiShifted = (Array.isArray(egmBi) && egmBi.length > 0)
-                    ? egmBi.map(val => val + i * shiftSpacing)
-                    : null;
-                const visibleSignals = [];
-                if (showUnipolar) visibleSignals.push(egmUniShifted);
-                if (egmBiShifted) visibleSignals.push(egmBiShifted);
+                const visibleSignals = [egmUniShifted];
 
                 if (Array.isArray(egmRefData[eId]) && egmRefData[eId].length > 0) {
                     const egmRef = egmRefData[eId];
@@ -625,34 +611,20 @@
                     });
                 }
 
-                if (showUnipolar) {
-                    traces.push({
-                        type: 'scatter',
-                        mode: 'lines',
-                        x: t,
-                        y: egmUniShifted,
-                        line: { color: 'magenta', width: 1 },
-                        showlegend: false,
-                        hovertemplate: `Time: %{x}<br><extra></extra>`
-                    });
-                }
+                traces.push({
+                    type: 'scatter',
+                    mode: 'lines',
+                    x: t,
+                    y: egmUniShifted,
+                    line: { color: 'blue', width: 1 },
+                    showlegend: false,
+                    hovertemplate: `Time: %{x}<br><extra></extra>`
+                });
 
-                if (egmBiShifted) {
-                    bipolarTraces.push({
-                        type: 'scatter',
-                        mode: 'lines',
-                        x: t,
-                        y: egmBiShifted,
-                        line: { color: 'blue', width: 1 },
-                        opacity: 0.7,
-                        showlegend: false,
-                    });
-                }
-
-                if (egmBiShifted && activationUni[eId] !== 0 && activationUni[eId] < egmBi.length) {
+                if (activationUni[eId] !== 0 && Number.isFinite(activationUni[eId]) && activationUni[eId] < egmUni.length) {
                     const actTime = activationUni[eId];
-                    const actValue = egmBi[actTime] + i * shiftSpacing;
-                    bipolarTraces.push({
+                    const actValue = egmUni[actTime] + i * shiftSpacing;
+                    traces.push({
                         type: 'scatter',
                         mode: 'markers',
                         x: [actTime],
@@ -666,6 +638,7 @@
                         showlegend: false,
                     });
                 }
+
                 for (const signal of visibleSignals) {
                     minY = Math.min(minY, ...signal);
                     maxY = Math.max(maxY, ...signal);
@@ -673,8 +646,6 @@
                 yTickVals.push(i * shiftSpacing);
                 yTickText.push(eId.toString());
             }
-
-            traces.push(...bipolarTraces);
 
             if (traces.length === 0 || !Number.isFinite(minY) || !Number.isFinite(maxY)) {
                 Plotly.newPlot('plot_electrograms', [], {
@@ -689,7 +660,7 @@
 
             const layout = {
                 title: {
-                    text: showUnipolar ? 'magenta: unipolar, blue: bipolar, cyan: reference' : 'blue: bipolar, cyan: reference',
+                    text: 'blue: unipolar, cyan: reference',
                     font: { size: 12 }
                 },
                 xaxis: {
@@ -885,16 +856,6 @@
             }
         });
 
-        document.getElementById('toggleUnipolar').addEventListener('change', () => {
-            if (document.getElementById('toggleEarliest').checked) {
-                showSortedElectrodes('earliest');
-            } else if (document.getElementById('toggleLatest').checked) {
-                showSortedElectrodes('latest');
-            } else {
-                renderElectrogram();
-            }
-        });
-
         document.getElementById('btnSave').addEventListener('click', async () => {
             if (!appData) return;
 
@@ -920,8 +881,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         segment_id: currentSegmentIndex,
-                        activation_uni: appData.activation_uni[currentSegmentIndex],
-                        activation_bi: appData.activation_bi[currentSegmentIndex]
+                        activation_uni: appData.activation_uni[currentSegmentIndex]
                     })
                 });
                 const result = await response.json();

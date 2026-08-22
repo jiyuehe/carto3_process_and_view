@@ -46,13 +46,11 @@ catheter = {
 # variable to store data
 segment_positions = np.asarray(catheter.get('mapping_position_unipolar', []), dtype=object)
 segment_count = len(segment_positions)
-segment_electrode_count = int(segment_positions[0].shape[0]) if segment_count else 0
+segment_electrode_count = int(segment_positions[0].shape[0])
 
-egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object)
-egm_bi_original = np.asarray(catheter.get('mapping_electrogram_bipolar', []), dtype=object)
-egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object)
-activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', np.zeros((segment_count, segment_electrode_count), dtype=object)), dtype=object)
-activation_bi = np.asarray(catheter.get('mapping_electrogram_bipolar_activation_within_woi', activation_uni), dtype=object)
+egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
+egm_ref = np.asarray(catheter.get('reference_electrogram', []), dtype=object) # shape is (n_segments, n_samples)
+activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', []), dtype=object) # shape is (n_segments, n_electrodes)
 
 def _segment_position_count(segment):
     """Return the number of 3D positions in a segment, or 0 if it is missing/invalid."""
@@ -148,10 +146,8 @@ data_store = {
     # flattened positions for all electrodes across all segments; ignore missing segments
     'electrode_positions_all': _flatten_segment_positions(segment_positions),
     'egm_uni_original': egm_uni_original,
-    'egm_bi_original': egm_bi_original,
     'egm_ref': egm_ref,
     'activation_uni': activation_uni,
-    'activation_bi': activation_bi,
     'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
     'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
 }
@@ -282,7 +278,6 @@ def get_data():
         'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),
         'activation_uni': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_uni']],
-        'activation_bi': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_bi']],
         'segment_count': int(data_store['segment_count']),
         'segment_electrode_count': int(data_store['segment_electrode_count']),
         'n_segments': int(data_store['segment_count']),
@@ -300,7 +295,6 @@ def get_electrograms():
         return jsonify({'error': 'segment_id is out-of-range'}), 400
 
     egm_uni = np.asarray(data_store['egm_uni_original'][segment_id], dtype=float)
-    egm_bi = np.asarray(data_store['egm_bi_original'][segment_id], dtype=float) if data_store['segment_count'] > 0 and data_store['egm_bi_original'].size > 0 else np.empty((egm_uni.shape[0], 0), dtype=float)
     egm_ref = np.asarray(data_store['egm_ref'][segment_id], dtype=float)
 
     n_electrodes = egm_uni.shape[1] if egm_uni.ndim > 1 else 0
@@ -311,7 +305,6 @@ def get_electrograms():
         'segment_id': segment_id,
         'electrode_ids': list(range(n_electrodes)),
         'egm_uni': [egm_uni[:, e_id].tolist() for e_id in range(n_electrodes)],
-        'egm_bi': [egm_bi[:, min(e_id, egm_bi.shape[1] - 1)].tolist() if egm_bi.shape[1] > 0 else [] for e_id in range(n_electrodes)],
         'egm_ref': [egm_ref.tolist() for _ in range(n_electrodes)],
     }
     return jsonify(utility.ui_functions.json_safe(response))
