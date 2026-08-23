@@ -665,16 +665,20 @@
                     });
                 }
 
-                if (activationUni[eId] !== 0 && Number.isFinite(activationUni[eId]) && activationUni[eId] < egmUni.length) {
+                const egmUniQrsSubtracted = egmUniQrsSubtractedData[eId];
+                if (Array.isArray(egmUniQrsSubtracted)
+                        && activationUni[eId] !== 0
+                        && Number.isFinite(activationUni[eId])
+                        && activationUni[eId] < egmUniQrsSubtracted.length) {
                     const actTime = activationUni[eId];
-                    const actValue = egmUni[actTime] + i * shiftSpacing;
+                    const actValue = egmUniQrsSubtracted[actTime] + i * shiftSpacing;
                     activationTraces.push({
                         type: 'scatter',
                         mode: 'markers',
                         x: [actTime],
                         y: [actValue],
                         marker: {
-                            symbol: 'x',
+                            symbol: 'circle',
                             size: 8,
                             color: 'red',
                             opacity: 0.7
