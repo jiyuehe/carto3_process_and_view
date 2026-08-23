@@ -51,6 +51,13 @@
                     <div id="inputs_activation_times" class="input-container"></div>
                 </div>
                 <div class="plot-bottom-control plot-bottom-control-right">
+                    <form id="woiControls" class="woi-controls">
+                        <label for="woiStart">WOI start</label>
+                        <input type="text" id="woiStart" class="woi-input" inputmode="numeric">
+                        <label for="woiEnd">WOI end</label>
+                        <input type="text" id="woiEnd" class="woi-input" inputmode="numeric">
+                        <span id="woiStatus" class="woi-status" role="status" aria-live="polite"></span>
+                    </form>
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggleInterpolateMesh">
                         <span class="toggle-slider"></span>
@@ -69,6 +76,7 @@
         let interpolationRequestId = 0;
         const editedSegmentIds = new Set();
         let isSaving = false;
+        let isUpdatingWoi = false;
 
         function setSaveStatus(message, type = '') {
             const status = document.getElementById('saveStatus');
@@ -80,7 +88,7 @@
             const saveButton = document.getElementById('btnSave');
             const editCount = editedSegmentIds.size;
             saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
-            saveButton.disabled = !appData || isSaving || editCount === 0;
+            saveButton.disabled = !appData || isSaving || isUpdatingWoi || editCount === 0;
         }
 
         function setSavingState(saving) {
@@ -91,6 +99,8 @@
             });
             document.getElementById('toggleEarliest').disabled = saving;
             document.getElementById('toggleLatest').disabled = saving;
+            document.getElementById('woiStart').disabled = saving;
+            document.getElementById('woiEnd').disabled = saving;
 
             if (saving) {
                 setSliderEnabled(false);
@@ -150,6 +160,8 @@
             }
 
             initializeSlider();
+            document.getElementById('woiStart').value = appData.clinical_electrogram_woi_start;
+            document.getElementById('woiEnd').value = appData.clinical_electrogram_woi_end;
             render3DPlot();
             renderElectrogram();
             updateSaveButton();
@@ -925,6 +937,87 @@
         document.getElementById('toggleFullHue').addEventListener('change', () => {
             render3DPlot(true);
         });
+
+        async function updateWindowOfInterest() {
+            if (!appData || isSaving || isUpdatingWoi) return;
+
+            const startInput = document.getElementById('woiStart');
+            const endInput = document.getElementById('woiEnd');
+            const status = document.getElementById('woiStatus');
+            const woiStart = Number(startInput.value.trim());
+            const woiEnd = Number(endInput.value.trim());
+
+            if (!Number.isInteger(woiStart) || !Number.isInteger(woiEnd) || woiStart < 0 || woiStart >= woiEnd) {
+                status.textContent = 'Enter integers with start < end.';
+                status.className = 'woi-status woi-status-error';
+                return;
+            }
+            if (woiStart === appData.clinical_electrogram_woi_start
+                    && woiEnd === appData.clinical_electrogram_woi_end) {
+                status.textContent = '';
+                return;
+            }
+
+            isUpdatingWoi = true;
+            updateSaveButton();
+            startInput.disabled = true;
+            endInput.disabled = true;
+            status.textContent = 'Updating…';
+            status.className = 'woi-status';
+
+            try {
+                const response = await fetch('/api/window-of-interest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        clinical_electrogram_woi_start: woiStart,
+                        clinical_electrogram_woi_end: woiEnd
+                    })
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+
+                appData.clinical_electrogram_woi_start = payload.clinical_electrogram_woi_start;
+                appData.clinical_electrogram_woi_end = payload.clinical_electrogram_woi_end;
+                appData.activation_uni = payload.activation_uni;
+                appData.mesh_activation = appData.mesh_vertex.map(() => null);
+                for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
+                    editedSegmentIds.add(segmentId);
+                }
+
+                document.getElementById('toggleEarliest').checked = false;
+                document.getElementById('toggleLatest').checked = false;
+                setSliderEnabled(true);
+                updateSaveButton();
+                setSaveStatus('WOI and activations updated; unsaved changes.', 'pending');
+                render3DPlot(true);
+                renderElectrogram();
+
+                if (document.getElementById('toggleInterpolateMesh').checked) {
+                    refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+                }
+                status.textContent = 'Updated';
+                status.className = 'woi-status woi-status-success';
+            } catch (err) {
+                startInput.value = appData.clinical_electrogram_woi_start;
+                endInput.value = appData.clinical_electrogram_woi_end;
+                status.textContent = err.message;
+                status.className = 'woi-status woi-status-error';
+                console.error('Failed to update window of interest:', err);
+            } finally {
+                isUpdatingWoi = false;
+                startInput.disabled = false;
+                endInput.disabled = false;
+                updateSaveButton();
+            }
+        }
+
+        document.getElementById('woiControls').addEventListener('submit', (event) => {
+            event.preventDefault();
+            updateWindowOfInterest();
+        });
+        document.getElementById('woiStart').addEventListener('change', updateWindowOfInterest);
+        document.getElementById('woiEnd').addEventListener('change', updateWindowOfInterest);
 
         document.getElementById('toggleInterpolateMesh').addEventListener('change', (e) => {
             const plot = document.getElementById('mesh_and_electrode');

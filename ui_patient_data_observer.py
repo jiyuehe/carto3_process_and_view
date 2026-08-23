@@ -285,6 +285,60 @@ def interpolate_activation():
                             for value in mesh_activation]
     }))
 
+
+@app.route('/api/window-of-interest', methods=['POST'])
+def update_window_of_interest():
+    payload = request.get_json(silent=True) or {}
+    raw_woi_start = payload.get('clinical_electrogram_woi_start')
+    raw_woi_end = payload.get('clinical_electrogram_woi_end')
+
+    try:
+        if isinstance(raw_woi_start, bool) or isinstance(raw_woi_end, bool):
+            raise ValueError
+        if isinstance(raw_woi_start, float) and not raw_woi_start.is_integer():
+            raise ValueError
+        if isinstance(raw_woi_end, float) and not raw_woi_end.is_integer():
+            raise ValueError
+        woi_start = int(raw_woi_start)
+        woi_end = int(raw_woi_end)
+    except (TypeError, ValueError, OverflowError):
+        return jsonify({'error': 'WOI start and end must be integers'}), 400
+
+    if woi_start < 0 or woi_start >= woi_end:
+        return jsonify({'error': 'WOI must satisfy 0 <= start < end'}), 400
+
+    electrograms = data_store['egm_uni_qrs_subtracted']
+    sample_counts = [np.asarray(segment).shape[0] for segment in electrograms]
+    if not sample_counts or woi_end > min(sample_counts):
+        return jsonify({
+            'error': f'WOI end must not exceed the electrogram length ({min(sample_counts, default=0)})'
+        }), 400
+
+    with save_lock:
+        # Recompute on a detached dictionary so a failed calculation cannot leave
+        # the shared catheter state partially updated.
+        updated_catheter = utility.ui_functions.grab_activations_within_window_of_interest(
+            dict(data_store['clinical_data']), woi_start, woi_end
+        )
+        activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
+        updated_activation = updated_catheter[activation_key]
+
+        data_store['clinical_data']['clinical_electrogram_woi_start'] = woi_start
+        data_store['clinical_data']['clinical_electrogram_woi_end'] = woi_end
+        data_store['clinical_data'][activation_key] = updated_activation
+        data_store['clinical_electrogram_woi_start'] = woi_start
+        data_store['clinical_electrogram_woi_end'] = woi_end
+        data_store['activation_uni'] = updated_activation
+
+    return jsonify(utility.ui_functions.json_safe({
+        'status': 'ok',
+        'clinical_electrogram_woi_start': woi_start,
+        'clinical_electrogram_woi_end': woi_end,
+        'activation_uni': [np.asarray(segment, dtype=float).tolist()
+                           for segment in updated_activation],
+    }))
+
+
 @app.route('/api/save', methods=['POST'])
 def save_activation_times():
     payload = request.get_json(silent=True) or {}

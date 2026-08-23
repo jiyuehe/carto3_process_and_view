@@ -54,6 +54,40 @@ body {
     gap: 18px;
 }
 
+.woi-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.woi-input {
+    width: 52px;
+    padding: 5px;
+    text-align: center;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+.woi-input:focus {
+    outline: none;
+    border-color: #888;
+}
+
+.woi-status {
+    min-width: 54px;
+    color: #666;
+}
+
+.woi-status-success {
+    color: #247a35;
+}
+
+.woi-status-error {
+    color: #b42318;
+}
+
 .plot-egm {
     flex: 6;
     height: 800px;
