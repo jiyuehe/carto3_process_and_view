@@ -51,15 +51,11 @@ for seg_idx, seg in enumerate(segment_positions):
         if n_electrode_position != n_electrogram:
             segment_id_to_delete.append(seg_idx)
 
-segment_ids_to_delete = set(segment_id_to_delete)
-original_segment_count = len(segment_positions)
-for field_name, field_values in catheter.items():
-    if isinstance(field_values, list) and len(field_values) == original_segment_count:
-        catheter[field_name] = [
-            value
-            for segment_id, value in enumerate(field_values)
-            if segment_id not in segment_ids_to_delete
-        ]
+catheter['mapping_position_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_position_unipolar']) if idx not in segment_id_to_delete]
+catheter['mapping_electrogram_unipolar'] = [seg for idx, seg in enumerate(catheter['mapping_electrogram_unipolar']) if idx not in segment_id_to_delete]
+catheter['surface_electrogram'] = [seg for idx, seg in enumerate(catheter['surface_electrogram']) if idx not in segment_id_to_delete]
+catheter['reference_electrogram'] = [seg for idx, seg in enumerate(catheter['reference_electrogram']) if idx not in segment_id_to_delete]
+catheter['reference_name'] = [seg for idx, seg in enumerate(catheter['reference_name']) if idx not in segment_id_to_delete]
 
 debug_plot = 0
 if debug_plot: # plot the recordings of each segment
@@ -678,12 +674,6 @@ half_window_size_of_woi = 400//2
 t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
 t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
 catheter = utility.ui_functions.grab_activations_within_window_of_interest(catheter,t_start,t_end)
-
-# because the activation timings are of different amount depending on the electrogram, cannot directly save as .npz, therefore, do a transformation here in order to save the variable as .npz
-activation_array = np.empty((n_segment, n_channels), dtype=object)
-for segment_id, segment_activations in enumerate(catheter['mapping_electrogram_unipolar_activation']):
-    activation_array[segment_id, :] = segment_activations
-catheter['mapping_electrogram_unipolar_activation'] = activation_array
 
 file_path = directory['data'] / f'{name_prefix}_catheter.npz'
 np.savez(file_path, **catheter)
