@@ -116,18 +116,13 @@ electrode_positions = []
 for n in range(len(catheter['mapping_position_unipolar'])):
     positions = catheter['mapping_position_unipolar'][n]
     electrode_positions.append(positions)
-electrode_positions = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
 
 print('project electrode to mesh')
-projected_positions, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, electrode_positions)
+electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
+electrode_positions_on_mesh, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, electrode_positions_all)
 
-# Store ragged per-segment arrays in explicit one-dimensional object arrays.
-# np.savez otherwise tries to infer a homogeneous numeric shape and fails when
-# segments contain different numbers of electrodes.
-mesh['electrode_positions'] = np.empty(len(electrode_positions), dtype=object)
-mesh['electrode_positions'][:] = electrode_positions
-mesh['electrode_positions_on_mesh'] = np.empty(len(electrode_positions_on_mesh), dtype=object)
-mesh['electrode_positions_on_mesh'][:] = electrode_positions_on_mesh
+mesh['electrode_positions'] = electrode_positions
+mesh['electrode_positions_on_mesh'] = electrode_positions_on_mesh
 file_path = directory['data'] / f'{name_prefix}_mesh.npz'
 np.savez(file_path, **mesh, allow_pickle=True)
 
@@ -139,19 +134,18 @@ if debug_plot == 1: # plot the electrode positions on the mesh surface
         i=face[:, 0], j=face[:, 1], k=face[:, 2],
         color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
     ))
-    for n in range(len(electrode_positions_on_mesh)):
-        p = electrode_positions[n]
-        fig.add_trace(go.Scatter3d(
-            x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-            marker=dict(size=4, color='red'), name='Original electrodes',
-            legendgroup='original', showlegend=(n == 0)
-        ))
-        p = electrode_positions_on_mesh[n]
-        fig.add_trace(go.Scatter3d(
-            x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-            marker=dict(size=4, color='blue'), name='Projected electrodes',
-            legendgroup='projected', showlegend=(n == 0)
-        ))
+    p = electrode_positions_all
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='red'), name='Original electrodes',
+        legendgroup='original', showlegend=(n == 0)
+    ))
+    p = electrode_positions_on_mesh
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='blue'), name='Projected electrodes',
+        legendgroup='projected', showlegend=(n == 0)
+    ))
     fig.update_layout(
         title='Electrode positions projected onto mesh surface',
         scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),

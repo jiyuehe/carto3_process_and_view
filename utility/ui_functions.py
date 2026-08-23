@@ -92,7 +92,7 @@ def nearest_indices(query, reference, count, block_size=256):
     return indices, distances_sq
 
 def project_electrodes_to_mesh(vertices, faces, electrodes):
-    """Project each electrode onto its closest candidate mesh triangle."""
+    # Project each electrode onto its closest candidate mesh triangle
     vertex_faces = [[] for _ in range(len(vertices))]
     for face_id, face in enumerate(faces):
         for vertex_id in face:
@@ -152,7 +152,7 @@ def grab_activations_within_window_of_interest(catheter,t_start,t_end):
         activation_times_within_woi = np.zeros((len(activation_times_unipolar_refined),), dtype=object)
         for channel_idx in range(len(activation_times_unipolar_refined)):
             activation_times = activation_times_unipolar_refined[channel_idx]
-            if activation_times is not None and np.ptp(catheter['mapping_electrogram_unipolar_qrs_subtracted'][n][t_start:t_end,channel_idx]) >= 0.3:
+            if activation_times is not None and np.ptp(catheter['mapping_electrogram_unipolar_qrs_subtracted'][n][t_start:t_end,channel_idx]) >= 0.1:
                 temp = activation_times[(activation_times >= t_start+activation_time_edge_buffer) & (activation_times <= t_end-activation_time_edge_buffer)]
                 if len(temp) != 0:
                     activation_times_within_woi[channel_idx] = temp[0]
