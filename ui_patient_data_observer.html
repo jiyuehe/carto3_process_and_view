@@ -203,7 +203,7 @@
         function computeColors(activation, rangeOverride = null) {
             const validActivations = activation.filter(a => a !== 0 && Number.isFinite(a));
             if (validActivations.length === 0) {
-                return activation.map(() => 'rgba(80,80,80,0.1)');
+                return activation.map(() => 'rgb(128,128,128)');
             }
 
             const range = rangeOverride || {
@@ -216,7 +216,7 @@
 
             return activation.map(act => {
                 if (act === 0 || !Number.isFinite(act)) {
-                    return 'rgba(80,80,80,0.1)';
+                    return 'rgb(128,128,128)';
                 }
 
                 return getActivationColor((act - minVal) / span);
@@ -349,14 +349,25 @@
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
             const allActivations = getAllActivations();
-            const allColors = computeColors(allActivations, getGlobalActivationRange());
-            const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
+            const otherActivations = allActivations.slice(0, startIndex).concat(allActivations.slice(startIndex + currLen));
+            const {
+                activePosns: otherActivePosns,
+                activeColors: otherActiveColors,
+                inactivePosns: otherInactivePosns,
+                inactiveColors: otherInactiveColors
+            } = splitElectrodesByActivation(otherActivations, otherPosns, range);
             Plotly.restyle(plot, {
-                x: [otherPosns.map(p => p[0])],
-                y: [otherPosns.map(p => p[1])],
-                z: [otherPosns.map(p => p[2])],
-                'marker.color': [otherColors]
+                x: [otherActivePosns.map(p => p[0])],
+                y: [otherActivePosns.map(p => p[1])],
+                z: [otherActivePosns.map(p => p[2])],
+                'marker.color': [otherActiveColors]
             }, [4]);
+            Plotly.restyle(plot, {
+                x: [otherInactivePosns.map(p => p[0])],
+                y: [otherInactivePosns.map(p => p[1])],
+                z: [otherInactivePosns.map(p => p[2])],
+                'marker.color': [otherInactiveColors]
+            }, [5]);
 
         }
 
@@ -432,7 +443,7 @@
                 x: inactivePosns.map(p => p[0]),
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
-                marker: { size: 2, color: inactiveColors, opacity: 0.6 },
+                marker: { size: 2, color: inactiveColors, opacity: 0.1 },
                 showlegend: false, hoverinfo: 'none',
             };
 
@@ -444,16 +455,31 @@
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
             const allActivations = getAllActivations();
-            const allColors = computeColors(allActivations, activationRange);
-            const otherColors = allColors.slice(0, startIndex).concat(allColors.slice(startIndex + currLen));
+            const otherActivations = allActivations.slice(0, startIndex).concat(allActivations.slice(startIndex + currLen));
+            const {
+                activePosns: otherActivePosns,
+                activeColors: otherActiveColors,
+                inactivePosns: otherInactivePosns,
+                inactiveColors: otherInactiveColors
+            } = splitElectrodesByActivation(otherActivations, otherPosns, activationRange);
 
-            const otherSegmentsTrace = {
+            const otherSegmentsActiveTrace = {
                 type: 'scatter3d',
                 mode: 'markers',
-                x: otherPosns.map(p => p[0]),
-                y: otherPosns.map(p => p[1]),
-                z: otherPosns.map(p => p[2]),
-                marker: { size: 2, color: otherColors, opacity: 0.8 },
+                x: otherActivePosns.map(p => p[0]),
+                y: otherActivePosns.map(p => p[1]),
+                z: otherActivePosns.map(p => p[2]),
+                marker: { size: 2, color: otherActiveColors, opacity: 0.8 },
+                showlegend: false, hoverinfo: 'none'
+            };
+
+            const otherSegmentsInactiveTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: otherInactivePosns.map(p => p[0]),
+                y: otherInactivePosns.map(p => p[1]),
+                z: otherInactivePosns.map(p => p[2]),
+                marker: { size: 2, color: otherInactiveColors, opacity: 0.1 },
                 showlegend: false, hoverinfo: 'none'
             };
 
@@ -500,7 +526,8 @@
                 meshEdgeTrace,
                 electrodeActiveTrace,
                 electrodeInactiveTrace,
-                otherSegmentsTrace,
+                otherSegmentsActiveTrace,
+                otherSegmentsInactiveTrace,
                 electrodeLabelTrace
             ], layout, {
                 responsive: true
@@ -659,7 +686,7 @@
                         mode: 'lines',
                         x: t,
                         y: egmUniQrsSubtractedShifted,
-                        line: { color: 'blue', width: 1 },
+                        line: { color: 'blue', width: 2 },
                         showlegend: false,
                         hovertemplate: `Time: %{x}<br><extra></extra>`
                     });
