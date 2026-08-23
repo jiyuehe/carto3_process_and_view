@@ -12,3 +12,9 @@ Edit configuration.py: change the directory['data'] to your directory
 Install dependencies:  
 Activate your python virtual environment, open terminal in this folder, type:  
 pip install -r requirements.txt  
+
+# How to run
+1. configuration.py  
+2. process_electrogram.py  
+3. ui_patient_data_observer.py 
+ 
