@@ -677,6 +677,15 @@ for segment_id, segment_activations in enumerate(catheter['mapping_electrogram_u
     activation_array[segment_id, :] = segment_activations
 catheter['mapping_electrogram_unipolar_activation'] = activation_array
 
+for field_name in (
+    'coronary_sinus_position_unipolar',
+    'coronary_sinus_position_bipolar',
+):
+    values = catheter[field_name]
+    object_array = np.empty(len(values), dtype=object)
+    object_array[:] = values
+    catheter[field_name] = object_array
+
 file_path = directory['data'] / f'{name_prefix}_catheter.npz'
 np.savez(file_path, **catheter)
 
