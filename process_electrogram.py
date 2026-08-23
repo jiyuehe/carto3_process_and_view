@@ -113,15 +113,13 @@ vertex = mesh['geometry_original_vertex']
 face = mesh['geometry_original_face']
 
 electrode_positions = []
-electrode_positions_on_mesh = []
 for n in range(len(catheter['mapping_position_unipolar'])):
-    print(f'project electrode to mesh {n} in [0, {len(catheter['mapping_position_unipolar'])-1}]')
-
     positions = catheter['mapping_position_unipolar'][n]
     electrode_positions.append(positions)
+electrode_positions = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
 
-    projected_positions, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, positions)
-    electrode_positions_on_mesh.append(projected_positions)
+print('project electrode to mesh')
+projected_positions, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, electrode_positions)
 
 # Store ragged per-segment arrays in explicit one-dimensional object arrays.
 # np.savez otherwise tries to infer a homogeneous numeric shape and fails when
