@@ -260,7 +260,6 @@ input[type='range']::-moz-range-thumb {
     white-space: nowrap;
 }
 
-/* Toggle switch */
 .toggle-switch {
     display: flex;
     flex: 0 0 auto;

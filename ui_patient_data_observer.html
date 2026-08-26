@@ -87,8 +87,12 @@
         function updateSaveButton() {
             const saveButton = document.getElementById('btnSave');
             const editCount = editedSegmentIds.size;
+            const hasInvalidActivation = Boolean(
+                document.querySelector('.activation-input[aria-invalid="true"]')
+            );
             saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
-            saveButton.disabled = !appData || isSaving || isUpdatingWoi || editCount === 0;
+            saveButton.disabled = !appData || isSaving || isUpdatingWoi
+                || hasInvalidActivation || editCount === 0;
         }
 
         function setSavingState(saving) {
@@ -546,6 +550,33 @@
             });
         }
 
+        function validateActivationInput(input) {
+            const rawValue = input.value.trim();
+            const woiStart = appData.clinical_electrogram_woi_start;
+            const woiEnd = appData.clinical_electrogram_woi_end;
+            let value = 0;
+            let message = '';
+
+            if (input.validity.badInput) {
+                message = 'Enter a whole number.';
+            } else if (rawValue !== '') {
+                value = Number(rawValue);
+                if (!Number.isFinite(value) || !Number.isInteger(value)) {
+                    message = 'Enter a whole number.';
+                } else if (value !== 0 && (value < woiStart || value > woiEnd)) {
+                    message = `Enter 0 or a value from ${woiStart} to ${woiEnd}.`;
+                }
+            }
+
+            input.setCustomValidity(message);
+            if (message) {
+                input.setAttribute('aria-invalid', 'true');
+            } else {
+                input.removeAttribute('aria-invalid');
+            }
+            return { valid: message === '', value, message };
+        }
+
         function renderCombinedInputs(electrodeIds) {
             if (!electrodeIds) {
                 electrodeIds = Array.from({ length: getCurrentSegmentPositions().length }, (_, i) => i);
@@ -575,9 +606,14 @@
 
                 uniInput.addEventListener('input', (e) => {
                     const electrodeId = parseInt(e.target.dataset.electrodeId);
-                    const rawValue = e.target.value;
-                    const newValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
-                    appData.activation_uni[renderedSegmentId][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+                    const result = validateActivationInput(e.target);
+                    if (!result.valid) {
+                        setSaveStatus(`Electrode ${electrodeId}: ${result.message}`, 'error');
+                        updateSaveButton();
+                        return;
+                    }
+
+                    appData.activation_uni[renderedSegmentId][electrodeId] = result.value;
                     editedSegmentIds.add(renderedSegmentId);
                     setSaveStatus('Unsaved changes', 'pending');
                     updateSaveButton();
@@ -585,9 +621,14 @@
 
                 uniInput.addEventListener('change', (e) => {
                     const electrodeId = parseInt(e.target.dataset.electrodeId);
-                    const rawValue = e.target.value;
-                    const newValue = rawValue === '' ? 0 : Number.parseFloat(rawValue);
-                    appData.activation_uni[renderedSegmentId][electrodeId] = Number.isFinite(newValue) ? newValue : 0;
+                    const result = validateActivationInput(e.target);
+                    if (!result.valid) {
+                        e.target.reportValidity();
+                        updateSaveButton();
+                        return;
+                    }
+
+                    appData.activation_uni[renderedSegmentId][electrodeId] = result.value;
                     editedSegmentIds.add(renderedSegmentId);
                     updateSaveButton();
 
