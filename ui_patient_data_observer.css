@@ -75,6 +75,10 @@ body {
     border-color: #888;
 }
 
+.input-unit {
+    color: #666;
+}
+
 .woi-status {
     min-width: 54px;
     color: #666;
@@ -305,12 +309,6 @@ input[type='range']::-moz-range-thumb {
 .toggle-text {
     font-size: 12px;
     color: #000;
-    white-space: nowrap;
-}
-
-.cycle-length-text {
-    font-size: 12px;
-    color: #666;
     white-space: nowrap;
 }
 

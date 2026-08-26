@@ -36,7 +36,6 @@
                     <input type="checkbox" id="toggleFullHue" checked>
                     <span class="toggle-slider"></span>
                     <span class="toggle-text">Full HSV</span>
-                    <span class="cycle-length-text" id="estimatedCycleLength">Cycle length: —</span>
                 </label>
                 <img class="hsv-color-wheel" src="demo/hsv_color_wheel.png" alt="HSV color wheel">
             </div>
@@ -57,6 +56,9 @@
                         <input type="text" id="woiStart" class="woi-input" inputmode="numeric">
                         <label for="woiEnd">WOI end</label>
                         <input type="text" id="woiEnd" class="woi-input" inputmode="numeric">
+                        <label for="cycleLength">Cycle length</label>
+                        <input type="text" id="cycleLength" class="woi-input" inputmode="decimal">
+                        <span class="input-unit">ms</span>
                         <span id="woiStatus" class="woi-status" role="status" aria-live="polite"></span>
                     </form>
                     <label class="toggle-switch">
@@ -168,10 +170,9 @@
             document.getElementById('woiStart').value = appData.clinical_electrogram_woi_start;
             document.getElementById('woiEnd').value = appData.clinical_electrogram_woi_end;
             const cycleLength = Number(appData.median_cycle_length);
-            const cycleLengthText = document.getElementById('estimatedCycleLength');
-            cycleLengthText.textContent = Number.isFinite(cycleLength) && cycleLength > 0
-                ? `Cycle length: ${Number.isInteger(cycleLength) ? cycleLength : cycleLength.toFixed(1)} ms`
-                : 'Cycle length: unavailable';
+            document.getElementById('cycleLength').value = Number.isFinite(cycleLength) && cycleLength > 0
+                ? (Number.isInteger(cycleLength) ? cycleLength : cycleLength.toFixed(1))
+                : '';
             render3DPlot();
             renderElectrogram();
             updateSaveButton();
@@ -326,7 +327,8 @@
             const requestId = ++interpolationRequestId;
             const payloadBody = {
                 activation_all: getAllActivations(),
-                full_hsv: document.getElementById('toggleFullHue').checked
+                full_hsv: document.getElementById('toggleFullHue').checked,
+                cycle_length: appData.median_cycle_length
             };
             const response = await fetch('/api/interpolate', {
                 method: 'POST',
@@ -1044,6 +1046,27 @@
             }
         });
 
+        function updateCycleLength() {
+            if (!appData) return false;
+
+            const input = document.getElementById('cycleLength');
+            const cycleLength = Number(input.value.trim());
+            const isValid = Number.isFinite(cycleLength) && cycleLength > 0;
+            input.setCustomValidity(isValid ? '' : 'Enter a cycle length greater than zero.');
+            if (!isValid) {
+                input.reportValidity();
+                return false;
+            }
+            if (cycleLength === appData.median_cycle_length) return true;
+
+            appData.median_cycle_length = cycleLength;
+            render3DPlot(true);
+            if (document.getElementById('toggleInterpolateMesh').checked) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+            }
+            return true;
+        }
+
         async function updateWindowOfInterest() {
             if (!appData || isSaving || isUpdatingWoi) return;
 
@@ -1121,10 +1144,14 @@
 
         document.getElementById('woiControls').addEventListener('submit', (event) => {
             event.preventDefault();
-            updateWindowOfInterest();
+            if (updateCycleLength()) updateWindowOfInterest();
         });
         document.getElementById('woiStart').addEventListener('change', updateWindowOfInterest);
         document.getElementById('woiEnd').addEventListener('change', updateWindowOfInterest);
+        document.getElementById('cycleLength').addEventListener('input', (event) => {
+            event.target.setCustomValidity('');
+        });
+        document.getElementById('cycleLength').addEventListener('change', updateCycleLength);
 
         document.getElementById('toggleInterpolateMesh').addEventListener('change', (e) => {
             const plot = document.getElementById('mesh_and_electrode');

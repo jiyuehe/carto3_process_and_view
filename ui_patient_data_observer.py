@@ -371,9 +371,15 @@ def interpolate_activation():
         activation_all[segment_id] = activation
         activation_all = activation_all.reshape(-1)
     if payload.get('full_hsv') is True:
-        cycle_length = data_store['median_cycle_length']
+        cycle_length = payload.get('cycle_length', data_store['median_cycle_length'])
+        if isinstance(cycle_length, bool):
+            return jsonify({'error': 'cycle length must be a positive number'}), 400
+        try:
+            cycle_length = float(cycle_length)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'cycle length must be a positive number'}), 400
         if not np.isfinite(cycle_length) or cycle_length <= 0:
-            return jsonify({'error': 'unable to estimate a valid electrogram cycle length'}), 422
+            return jsonify({'error': 'cycle length must be a positive number'}), 422
         mesh_phase, phase_confidence, phase_origin = interpolate_activation_phase_to_mesh(
             activation_all, cycle_length
         )
