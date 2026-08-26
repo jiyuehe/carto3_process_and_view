@@ -15,6 +15,7 @@
 #%%
 import numpy as np
 from scipy.interpolate import griddata
+from scipy.signal import find_peaks
 from flask import Flask, render_template, jsonify, request
 import os
 import tempfile
@@ -24,6 +25,47 @@ import subprocess
 import time
 import configuration
 import utility
+
+
+def estimate_electrogram_cycle_lengths(electrogram_segments):
+    """Estimate one cycle length per electrogram from normalized autocorrelation."""
+    cycle_lengths = []
+
+    for segment in electrogram_segments:
+        electrograms = np.asarray(segment, dtype=np.float64)
+        if electrograms.ndim != 2 or electrograms.shape[0] < 3:
+            continue
+
+        n_samples, _ = electrograms.shape
+        finite_channels = np.all(np.isfinite(electrograms), axis=0)
+        active_channels = finite_channels & (np.ptp(electrograms, axis=0) >= 0.3)
+        if not np.any(active_channels):
+            continue
+
+        signals = electrograms[:, active_channels]
+        signals = signals - np.mean(signals, axis=0, keepdims=True)
+
+        # FFT equivalent of the one-sided np.correlate calculation already
+        # used in process_electrogram.py, evaluated for all channels together.
+        fft_length = 1 << (2 * n_samples - 2).bit_length()
+        spectra = np.fft.rfft(signals, n=fft_length, axis=0)
+        autocorrelations = np.fft.irfft(
+            spectra * np.conjugate(spectra), n=fft_length, axis=0
+        )[:n_samples]
+
+        zero_lag = autocorrelations[0]
+        usable = np.isfinite(zero_lag) & (zero_lag > 0)
+        autocorrelations[:, usable] /= zero_lag[usable]
+
+        for channel_index in np.flatnonzero(usable):
+            autocorrelation = autocorrelations[:, channel_index]
+            candidate_lags, _ = find_peaks(autocorrelation, prominence=0.05)
+            candidate_lags = candidate_lags[candidate_lags != 1]
+            if candidate_lags.size:
+                strongest = candidate_lags[np.argmax(autocorrelation[candidate_lags])]
+                cycle_lengths.append(float(strongest))
+
+    return np.asarray(cycle_lengths, dtype=np.float64)
 
 #%%
 # setting
@@ -52,6 +94,16 @@ egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), 
 egm_uni_qrs_subtracted = np.asarray(catheter.get('mapping_electrogram_unipolar_qrs_subtracted', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
 egm_ref = np.asarray(catheter.get('surface_ecg_sum', []), dtype=object) # shape is (n_segments, n_samples)
 activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', []), dtype=object) # shape is (n_segments, n_electrodes)
+
+electrogram_cycle_lengths = estimate_electrogram_cycle_lengths(egm_uni_qrs_subtracted)
+median_cycle_length = (
+    float(np.median(electrogram_cycle_lengths))
+    if electrogram_cycle_lengths.size else np.nan
+)
+print(
+    f'Estimated median cycle length: {median_cycle_length:g} samples '
+    f'from {electrogram_cycle_lengths.size} electrograms'
+)
 
 #%%
 # grab all pre-computed electrode positions across all segments
@@ -82,6 +134,8 @@ data_store = {
     'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
     'egm_ref': egm_ref,
     'activation_uni': activation_uni,
+    'electrogram_cycle_lengths': electrogram_cycle_lengths,
+    'median_cycle_length': median_cycle_length,
     'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
     'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
 }
@@ -198,6 +252,38 @@ def interpolate_activation_to_mesh(activation):
 
     return griddata(sample_points[valid], activation[valid], data_store['mesh_vertex'], method='linear')
 
+
+def interpolate_activation_phase_to_mesh(activation, cycle_length):
+    """Circularly interpolate activation phase for the Full HSV colorscale."""
+    activation = np.asarray(activation, dtype=np.float64)
+    sample_points = np.asarray(
+        data_store['electrode_positions_on_mesh_all'], dtype=np.float64
+    )
+    valid = np.isfinite(activation) & (activation != 0) & np.all(
+        np.isfinite(sample_points), axis=1
+    )
+    empty = np.full(len(data_store['mesh_vertex']), np.nan)
+    if not np.any(valid) or not np.isfinite(cycle_length) or cycle_length <= 0:
+        return empty, empty.copy(), np.nan
+
+    phase_origin = float(np.min(activation[valid]))
+    phase = np.mod((activation[valid] - phase_origin) / cycle_length, 1.0)
+    angles = 2.0 * np.pi * phase
+    phase_vectors = np.column_stack((np.cos(angles), np.sin(angles)))
+    mesh_vectors = griddata(
+        sample_points[valid], phase_vectors, data_store['mesh_vertex'], method='linear'
+    )
+
+    confidence = np.hypot(mesh_vectors[:, 0], mesh_vectors[:, 1])
+    mesh_phase = np.mod(
+        np.arctan2(mesh_vectors[:, 1], mesh_vectors[:, 0]) / (2.0 * np.pi),
+        1.0,
+    )
+    ambiguous = ~np.isfinite(confidence) | (confidence <= 1e-12)
+    mesh_phase[ambiguous] = np.nan
+    confidence[ambiguous] = np.nan
+    return mesh_phase, confidence, phase_origin
+
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
 @app.route('/')
 def index():
@@ -218,6 +304,12 @@ def get_data():
             for seg in data_store['electrode_positions_on_mesh']
         ],
         'mesh_activation': [None] * len(data_store['mesh_vertex']),
+        'mesh_phase': [None] * len(data_store['mesh_vertex']),
+        'median_cycle_length': (
+            float(data_store['median_cycle_length'])
+            if np.isfinite(data_store['median_cycle_length']) else None
+        ),
+        'cycle_length_electrogram_count': int(len(data_store['electrogram_cycle_lengths'])),
         'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),
         'activation_uni': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_uni']],
@@ -264,7 +356,6 @@ def interpolate_activation():
         activation_all = np.asarray(payload.get('activation_all', []), dtype=np.float64)
         if activation_all.ndim != 1 or activation_all.shape[0] != data_store['electrode_positions_all'].shape[0]:
             return jsonify({'error': 'activation_all has the wrong length'}), 400
-        mesh_activation = interpolate_activation_to_mesh(activation_all)
     else:
         segment_id = int(payload.get('segment_id', 0))
         activation = np.asarray(payload.get('activation_uni', []), dtype=np.float64)
@@ -279,7 +370,23 @@ def interpolate_activation():
         activation_all = np.asarray(data_store['activation_uni'], dtype=float).copy()
         activation_all[segment_id] = activation
         activation_all = activation_all.reshape(-1)
-        mesh_activation = interpolate_activation_to_mesh(activation_all)
+    if payload.get('full_hsv') is True:
+        cycle_length = data_store['median_cycle_length']
+        if not np.isfinite(cycle_length) or cycle_length <= 0:
+            return jsonify({'error': 'unable to estimate a valid electrogram cycle length'}), 422
+        mesh_phase, phase_confidence, phase_origin = interpolate_activation_phase_to_mesh(
+            activation_all, cycle_length
+        )
+        return jsonify(utility.ui_functions.json_safe({
+            'mesh_phase': [None if not np.isfinite(value) else float(value)
+                           for value in mesh_phase],
+            'mesh_phase_confidence': [None if not np.isfinite(value) else float(value)
+                                      for value in phase_confidence],
+            'phase_origin': phase_origin,
+            'cycle_length': float(cycle_length),
+        }))
+
+    mesh_activation = interpolate_activation_to_mesh(activation_all)
     return jsonify(utility.ui_functions.json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
                             for value in mesh_activation]

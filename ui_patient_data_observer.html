@@ -36,6 +36,7 @@
                     <input type="checkbox" id="toggleFullHue" checked>
                     <span class="toggle-slider"></span>
                     <span class="toggle-text">Full HSV</span>
+                    <span class="cycle-length-text" id="estimatedCycleLength">Cycle length: —</span>
                 </label>
                 <img class="hsv-color-wheel" src="demo/hsv_color_wheel.png" alt="HSV color wheel">
             </div>
@@ -166,6 +167,11 @@
             initializeSlider();
             document.getElementById('woiStart').value = appData.clinical_electrogram_woi_start;
             document.getElementById('woiEnd').value = appData.clinical_electrogram_woi_end;
+            const cycleLength = Number(appData.median_cycle_length);
+            const cycleLengthText = document.getElementById('estimatedCycleLength');
+            cycleLengthText.textContent = Number.isFinite(cycleLength) && cycleLength > 0
+                ? `Cycle length: ${Number.isInteger(cycleLength) ? cycleLength : cycleLength.toFixed(1)} ms`
+                : 'Cycle length: unavailable';
             render3DPlot();
             renderElectrogram();
             updateSaveButton();
@@ -229,12 +235,18 @@
             const minVal = range.min;
             const maxVal = range.max;
             const span = Math.max(maxVal - minVal, 1e-9);
+            const fullHue = document.getElementById('toggleFullHue').checked;
+            const cycleLength = Number(appData?.median_cycle_length);
 
             return activation.map(act => {
                 if (act === 0 || !Number.isFinite(act)) {
                     return 'rgb(128,128,128)';
                 }
 
+                if (fullHue && Number.isFinite(cycleLength) && cycleLength > 0) {
+                    const phase = ((act - minVal) / cycleLength % 1 + 1) % 1;
+                    return getActivationColor(phase, true);
+                }
                 return getActivationColor((act - minVal) / span);
             });
         }
@@ -261,14 +273,28 @@
             });
         }
 
-        function getMeshColorSettings(meshActivation, activationRange) {
+        function getMeshColorSettings(meshActivation, meshPhase, activationRange) {
+            const fullHue = document.getElementById('toggleFullHue').checked;
+            if (fullHue) {
+                return {
+                    intensity: meshPhase.map(() => 0),
+                    colorscale: [[0, 'rgb(160,160,160)'], [1, 'rgb(160,160,160)']],
+                    cmin: 0,
+                    cmax: 1,
+                    vertexcolor: meshPhase.map(value => value === null || !Number.isFinite(value)
+                        ? 'rgb(160,160,160)'
+                        : getActivationColor(value, true))
+                };
+            }
+
             const hasValues = meshActivation.some(value => value !== null);
             if (!hasValues) {
                 return {
                     intensity: meshActivation.map(() => 0),
                     colorscale: [[0, 'rgb(160,160,160)'], [1, 'rgb(160,160,160)']],
                     cmin: 0,
-                    cmax: 1
+                    cmax: 1,
+                    vertexcolor: null
                 };
             }
 
@@ -283,7 +309,8 @@
                     ...activationScale.map(([position, color]) => [0.5 + 0.5 * position, color])
                 ],
                 cmin: maskedValue,
-                cmax: activationRange.max
+                cmax: activationRange.max,
+                vertexcolor: null
             };
         }
 
@@ -291,10 +318,15 @@
             return appData.mesh_activation || appData.mesh_vertex.map(() => null);
         }
 
+        function interpolateMeshPhase() {
+            return appData.mesh_phase || appData.mesh_vertex.map(() => null);
+        }
+
         async function refreshMeshInterpolation() {
             const requestId = ++interpolationRequestId;
             const payloadBody = {
-                activation_all: getAllActivations()
+                activation_all: getAllActivations(),
+                full_hsv: document.getElementById('toggleFullHue').checked
             };
             const response = await fetch('/api/interpolate', {
                 method: 'POST',
@@ -304,8 +336,24 @@
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
             if (requestId !== interpolationRequestId) return;
-            appData.mesh_activation = payload.mesh_activation;
-            update3DActivationColors();
+            if (payloadBody.full_hsv) {
+                if (!Array.isArray(payload.mesh_phase)
+                        || payload.mesh_phase.length !== appData.mesh_vertex.length) {
+                    throw new Error('Full HSV phase data is missing; restart the Python server.');
+                }
+                appData.mesh_phase = payload.mesh_phase;
+                appData.mesh_activation = appData.mesh_vertex.map(() => null);
+            } else {
+                appData.mesh_activation = payload.mesh_activation;
+                appData.mesh_phase = appData.mesh_vertex.map(() => null);
+            }
+            if (payloadBody.full_hsv) {
+                // Rebuild the mesh so Plotly switches cleanly from its initial
+                // gray vertex colors to the returned circular-phase colors.
+                render3DPlot(true);
+            } else {
+                update3DActivationColors();
+            }
         }
 
         function splitElectrodesByActivation(activation, electrodePositions, range = null) {
@@ -331,18 +379,27 @@
             const electrodePositions = getCurrentSegmentPositions();
             const allElectrodePositions = getAllSegmentPositions();
             const meshActivation = interpolateMeshActivation(activation);
+            const meshPhase = interpolateMeshPhase();
             const range = getGlobalActivationRange();
-            const meshColors = getMeshColorSettings(meshActivation, range);
+            const meshColors = getMeshColorSettings(meshActivation, meshPhase, range);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
             const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions, range);
 
             // update mesh coloring
-            Plotly.restyle(plot, {
-                intensity: [meshColors.intensity],
-                colorscale: [meshColors.colorscale],
-                cmin: meshColors.cmin,
-                cmax: meshColors.cmax
-            }, [0]);
+            const meshUpdate = meshColors.vertexcolor
+                ? {
+                    vertexcolor: [meshColors.vertexcolor],
+                    intensity: [null],
+                    colorscale: [null]
+                }
+                : {
+                    vertexcolor: [null],
+                    intensity: [meshColors.intensity],
+                    colorscale: [meshColors.colorscale],
+                    cmin: meshColors.cmin,
+                    cmax: meshColors.cmax
+                };
+            Plotly.restyle(plot, meshUpdate, [0]);
 
             // update current-segment active/inactive electrodes
             Plotly.restyle(plot, {
@@ -391,8 +448,9 @@
             const activation = getCurrentActivation();
             const electrodePositions = getCurrentSegmentPositions();
             const meshActivation = interpolateMeshActivation(activation);
+            const meshPhase = interpolateMeshPhase();
             const activationRange = getGlobalActivationRange();
-            const meshColors = getMeshColorSettings(meshActivation, activationRange);
+            const meshColors = getMeshColorSettings(meshActivation, meshPhase, activationRange);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
 
             const meshVertices = appData.mesh_vertex || [];
@@ -406,11 +464,15 @@
                 i: meshFaces.map(face => face[0]),
                 j: meshFaces.map(face => face[1]),
                 k: meshFaces.map(face => face[2]),
-                intensity: meshColors.intensity,
-                intensitymode: 'vertex',
-                colorscale: meshColors.colorscale,
-                cmin: meshColors.cmin,
-                cmax: meshColors.cmax,
+                ...(meshColors.vertexcolor
+                    ? { vertexcolor: meshColors.vertexcolor }
+                    : {
+                        intensity: meshColors.intensity,
+                        intensitymode: 'vertex',
+                        colorscale: meshColors.colorscale,
+                        cmin: meshColors.cmin,
+                        cmax: meshColors.cmax
+                    }),
                 opacity: 1,
                 visible: showMesh,
                 showscale: false,
@@ -977,6 +1039,9 @@
 
         document.getElementById('toggleFullHue').addEventListener('change', () => {
             render3DPlot(true);
+            if (document.getElementById('toggleInterpolateMesh').checked) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+            }
         });
 
         async function updateWindowOfInterest() {
@@ -1022,6 +1087,7 @@
                 appData.clinical_electrogram_woi_end = payload.clinical_electrogram_woi_end;
                 appData.activation_uni = payload.activation_uni;
                 appData.mesh_activation = appData.mesh_vertex.map(() => null);
+                appData.mesh_phase = appData.mesh_vertex.map(() => null);
                 for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
                     editedSegmentIds.add(segmentId);
                 }

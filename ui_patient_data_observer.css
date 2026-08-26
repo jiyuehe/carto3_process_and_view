@@ -308,6 +308,12 @@ input[type='range']::-moz-range-thumb {
     white-space: nowrap;
 }
 
+.cycle-length-text {
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+}
+
 .hsv-color-wheel {
     display: block;
     flex: 0 0 auto;
