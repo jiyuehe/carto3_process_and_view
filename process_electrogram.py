@@ -64,13 +64,12 @@ for field_name, field_values in catheter.items():
 debug_plot = 0
 if debug_plot: # plot the recordings of each segment
     recording_groups = (
-        ('Mapping unipolar electrograms', catheter['mapping_electrogram_unipolar'], mapping_name_unipolar, 'magenta'),
+        ('Mapping unipolar electrograms', catheter['mapping_electrogram_unipolar'], mapping_name_unipolar, 'blue'),
         ('Surface electrograms', catheter['surface_electrogram'], surface_name, 'blue'),
-        ('Reference electrogram', catheter['reference_electrogram'], ['reference'], 'cyan'),
     )
 
     for segment_id in range(len(catheter['mapping_electrogram_unipolar'])):
-        fig, axes = plt.subplots(1, 3, figsize=(14, 10), sharex=True)
+        fig, axes = plt.subplots(1, 2, figsize=(14, 10), sharex=True)
 
         for axis, (title, segment_recordings, channel_names, color) in zip(axes, recording_groups):
             recordings = np.asarray(segment_recordings[segment_id], dtype=float)
@@ -78,14 +77,14 @@ if debug_plot: # plot the recordings of each segment
                 recordings = recordings[:, None]
 
             channel_magnitude = np.ptp(recordings, axis=0)
-            trace_spacing = max(1.0, np.nanmax(channel_magnitude) * 1.2)
+            trace_spacing = max(1.0, np.nanmax(channel_magnitude) * 1.05)
             trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
 
             axis.plot(
                 np.arange(recordings.shape[0]),
                 recordings + trace_offsets,
                 color=color,
-                linewidth=0.7,
+                linewidth=1,
             )
             axis.set_title(title)
             axis.set_yticks(trace_offsets)
