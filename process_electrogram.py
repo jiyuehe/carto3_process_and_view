@@ -104,55 +104,6 @@ if debug_plot: # plot the recordings of each segment
         plt.close(fig)
 
 #%%
-# project electrode positions onto the mesh surface
-data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
-mesh = {k: data[k] for k in data.files} # load mesh data
-
-vertex = mesh['geometry_original_vertex']
-face = mesh['geometry_original_face']
-
-electrode_positions = []
-for n in range(len(catheter['mapping_position_unipolar'])):
-    positions = catheter['mapping_position_unipolar'][n]
-    electrode_positions.append(positions)
-
-print('project electrode to mesh')
-electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
-electrode_positions_on_mesh, _ = utility.ui_functions.project_electrodes_to_mesh(vertex, face, electrode_positions_all)
-
-mesh['electrode_positions'] = electrode_positions
-mesh['electrode_positions_on_mesh'] = electrode_positions_on_mesh
-file_path = directory['data'] / f'{name_prefix}_mesh.npz'
-np.savez(file_path, **mesh, allow_pickle=True)
-
-debug_plot = 0
-if debug_plot == 1: # plot the electrode positions on the mesh surface
-    fig = go.Figure()
-    fig.add_trace(go.Mesh3d(
-        x=vertex[:, 0], y=vertex[:, 1], z=vertex[:, 2],
-        i=face[:, 0], j=face[:, 1], k=face[:, 2],
-        color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
-    ))
-    p = electrode_positions_all
-    fig.add_trace(go.Scatter3d(
-        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-        marker=dict(size=4, color='red'), name='Original electrodes',
-        legendgroup='original', showlegend=(n == 0)
-    ))
-    p = electrode_positions_on_mesh
-    fig.add_trace(go.Scatter3d(
-        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-        marker=dict(size=4, color='blue'), name='Projected electrodes',
-        legendgroup='projected', showlegend=(n == 0)
-    ))
-    fig.update_layout(
-        title='Electrode positions projected onto mesh surface',
-        scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
-        margin=dict(l=0, r=0, b=0, t=40)
-    )
-    fig.show()
-
-#%%
 # loop through each recording segment
 mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
 surface_electrogram = catheter['surface_electrogram']
@@ -687,5 +638,109 @@ for field_name in (
 
 file_path = directory['data'] / f'{name_prefix}_catheter.npz'
 np.savez(file_path, **catheter)
+
+#%%
+# project electrode positions onto the mesh surface
+data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
+mesh = {k: data[k] for k in data.files} # load mesh data
+
+original_vertex = mesh['geometry_original_vertex']
+original_face = mesh['geometry_original_face']
+refined_vertex = mesh['vertex']
+refined_face = mesh['face']
+
+electrode_positions = []
+for n in range(len(catheter['mapping_position_unipolar'])):
+    positions = catheter['mapping_position_unipolar'][n]
+    electrode_positions.append(positions)
+
+print('project electrodes to original and refined meshes')
+electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
+projection_normal_vicinity = 1.0 # mesh coordinate units; electrodes farther from every nearby vertex-normal line are rejected
+projection_max_distance = 10.0 # mesh coordinate units along the bidirectional vertex-normal line
+electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+    original_vertex,
+    original_face,
+    electrode_positions_all,
+    normal_vicinity=projection_normal_vicinity,
+    projection_max_distance=projection_max_distance,
+)
+electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+    refined_vertex,
+    refined_face,
+    electrode_positions_all,
+    normal_vicinity=projection_normal_vicinity,
+    projection_max_distance=projection_max_distance,
+)
+original_rejected_count = np.count_nonzero(
+    ~np.all(np.isfinite(electrode_positions_on_original_mesh_all), axis=1)
+)
+refined_rejected_count = np.count_nonzero(
+    ~np.all(np.isfinite(electrode_positions_on_refined_mesh_all), axis=1)
+)
+print(
+    f'rejected {original_rejected_count} original-mesh projections and '
+    f'{refined_rejected_count} refined-mesh projections outside the '
+    f'{projection_normal_vicinity:g}-unit normal vicinity or '
+    f'{projection_max_distance:g}-unit maximum projection distance'
+)
+
+mesh['electrode_positions'] = electrode_positions
+mesh['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
+mesh['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
+file_path = directory['data'] / f'{name_prefix}_mesh.npz'
+np.savez(file_path, **mesh, allow_pickle=True)
+
+debug_plot = 0
+if debug_plot == 1: # plot the electrode positions on the mesh surface
+    fig = go.Figure()
+    fig.add_trace(go.Mesh3d(
+        x=original_vertex[:, 0], y=original_vertex[:, 1], z=original_vertex[:, 2],
+        i=original_face[:, 0], j=original_face[:, 1], k=original_face[:, 2],
+        color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
+    ))
+    p = electrode_positions_all
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='red'), name='Original electrodes',
+        legendgroup='original', showlegend=(n == 0)
+    ))
+    p = electrode_positions_on_original_mesh_all
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='blue'), name='Projected electrodes',
+        legendgroup='projected', showlegend=(n == 0)
+    ))
+    fig.update_layout(
+        title='Electrode positions projected onto original mesh surface',
+        scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    fig.show()
+
+    fig = go.Figure()
+    fig.add_trace(go.Mesh3d(
+        x=refined_vertex[:, 0], y=refined_vertex[:, 1], z=refined_vertex[:, 2],
+        i=refined_face[:, 0], j=refined_face[:, 1], k=refined_face[:, 2],
+        color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
+    ))
+    p = electrode_positions_all
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='red'), name='Original electrodes',
+        legendgroup='original', showlegend=(n == 0)
+    ))
+    p = electrode_positions_on_refined_mesh_all
+    fig.add_trace(go.Scatter3d(
+        x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
+        marker=dict(size=4, color='blue'), name='Projected electrodes',
+        legendgroup='projected', showlegend=(n == 0)
+    ))
+    fig.update_layout(
+        title='Electrode positions projected onto refined mesh surface',
+        scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    fig.show()
 
 print('done')

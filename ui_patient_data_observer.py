@@ -136,16 +136,11 @@ def load_mesh_data(name_prefix):
         ])
         if segment_count else np.empty((0, 3), dtype=float)
     )
-    print(f'{name_prefix}: projecting electrode positions onto both meshes')
-    electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
-        np.asarray(mesh['geometry_original_vertex'], dtype=np.float64),
-        np.asarray(mesh['geometry_original_face'], dtype=np.int64),
-        electrode_positions_all,
+    electrode_positions_on_original_mesh_all = np.asarray(
+        mesh['electrode_positions_on_original_mesh_all'], dtype=np.float64
     )
-    electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
-        np.asarray(mesh['vertex'], dtype=np.float64),
-        np.asarray(mesh['face'], dtype=np.int64),
-        electrode_positions_all,
+    electrode_positions_on_refined_mesh_all = np.asarray(
+        mesh['electrode_positions_on_refined_mesh_all'], dtype=np.float64
     )
 
     return {
@@ -284,6 +279,7 @@ def interpolate_activation_to_mesh(activation, sample_points, mesh_vertices):
     activation = np.asarray(activation, dtype=np.float64)
     mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
+    # A rejected projection is [NaN, NaN, NaN] and must not contribute.
     valid = np.isfinite(activation) & (activation != 0) & np.all(
         np.isfinite(sample_points), axis=1
     )
@@ -300,6 +296,7 @@ def interpolate_activation_phase_to_mesh(
     activation = np.asarray(activation, dtype=np.float64)
     mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
+    # A rejected projection is [NaN, NaN, NaN] and must not contribute.
     valid = np.isfinite(activation) & (activation != 0) & np.all(
         np.isfinite(sample_points), axis=1
     )

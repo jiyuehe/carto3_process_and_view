@@ -86,19 +86,80 @@ def nearest_indices(query, reference, count, block_size=256):
         indices = indices[:, None]
     return indices.astype(np.int32, copy=False), np.square(distances)
 
-def project_electrodes_to_mesh(vertices, faces, electrodes):
+def mesh_vertex_normals(vertices, faces):
+    """Return area-weighted unit vertex normals for a triangle mesh."""
+    triangles = vertices[faces]
+    face_normals = np.cross(
+        triangles[:, 1] - triangles[:, 0],
+        triangles[:, 2] - triangles[:, 0],
+    )
+    vertex_normals = np.zeros_like(vertices, dtype=np.float64)
+    for corner in range(3):
+        np.add.at(vertex_normals, faces[:, corner], face_normals)
+
+    lengths = np.linalg.norm(vertex_normals, axis=1)
+    usable = np.isfinite(lengths) & (lengths > 0)
+    vertex_normals[usable] /= lengths[usable, None]
+    vertex_normals[~usable] = np.nan
+    return vertex_normals
+
+
+def project_electrodes_to_mesh(
+    vertices,
+    faces,
+    electrodes,
+    normal_vicinity=1.0,
+    projection_max_distance=10.0,
+    normal_candidate_count=16,
+):
+    """Project electrodes near a vertex-normal line; reject the rest with NaNs.
+
+    Normal lines are treated as bidirectional so the result does not depend on
+    the mesh's face-winding direction.
+    """
+    vertices = np.asarray(vertices, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+    electrodes = np.asarray(electrodes, dtype=np.float64)
+    if normal_vicinity < 0:
+        raise ValueError('normal_vicinity must be non-negative')
+    if projection_max_distance < 0:
+        raise ValueError('projection_max_distance must be non-negative')
+
     # Project each electrode onto its closest candidate mesh triangle
     vertex_faces = [[] for _ in range(len(vertices))]
     for face_id, face in enumerate(faces):
         for vertex_id in face:
             vertex_faces[int(vertex_id)].append(face_id)
 
-    nearby_vertices, _ = nearest_indices(electrodes, vertices, count=4)
-    projected = np.empty_like(electrodes, dtype=np.float64)
-    projection_faces = np.empty(len(electrodes), dtype=np.int32)
+    vertex_normals = mesh_vertex_normals(vertices, faces)
+    nearby_vertices, _ = nearest_indices(
+        electrodes, vertices, count=max(4, normal_candidate_count)
+    )
+    nearby_offsets = electrodes[:, None, :] - vertices[nearby_vertices]
+    nearby_normals = vertex_normals[nearby_vertices]
+    axial_offsets = np.einsum('evi,evi->ev', nearby_offsets, nearby_normals)
+    perpendicular_offsets = (
+        nearby_offsets - axial_offsets[:, :, None] * nearby_normals
+    )
+    distance_to_normal = np.linalg.norm(perpendicular_offsets, axis=2)
+    normal_matches = (
+        (distance_to_normal <= normal_vicinity)
+        & (np.abs(axial_offsets) <= projection_max_distance)
+    )
+
+    projected = np.full_like(electrodes, np.nan, dtype=np.float64)
+    projection_faces = np.full(len(electrodes), -1, dtype=np.int32)
     triangles = vertices[faces]
     for electrode_id, vertex_ids in enumerate(nearby_vertices):
-        candidates = np.unique(np.concatenate([vertex_faces[v] for v in vertex_ids]))
+        matched_vertex_ids = vertex_ids[normal_matches[electrode_id]]
+        if not len(matched_vertex_ids):
+            continue
+        candidate_face_groups = [
+            vertex_faces[v] for v in matched_vertex_ids if vertex_faces[v]
+        ]
+        if not candidate_face_groups:
+            continue
+        candidates = np.unique(np.concatenate(candidate_face_groups))
         points = closest_points_on_triangles(electrodes[electrode_id], triangles[candidates])
         delta = points - electrodes[electrode_id]
         distance_sq = np.einsum('ij,ij->i', delta, delta)
