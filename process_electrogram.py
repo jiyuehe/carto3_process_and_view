@@ -68,7 +68,7 @@ if debug_plot: # plot the recordings of each segment
         ('Surface electrograms', catheter['surface_electrogram'], surface_name, 'blue'),
     )
 
-    for segment_id in range(len(catheter['mapping_electrogram_unipolar'])):
+    for segment_id in [7]: #range(len(catheter['mapping_electrogram_unipolar'])):
         fig, axes = plt.subplots(1, 2, figsize=(14, 10), sharex=True)
 
         for axis, (title, segment_recordings, channel_names, color) in zip(axes, recording_groups):
@@ -377,32 +377,54 @@ for n in range(n_segment):
 
     debug_plot = 0
     if debug_plot: # plot the QRS-subtracted unipolar electrograms and their autocorrelations
-        fig, axes = plt.subplots(n_channels, 2, figsize=(14, 4 * n_channels), squeeze=False)
-        sample_axis = np.arange(n_samples)
-        lag_axis = np.arange(n_samples)
+        time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
+        signal_magnitude = np.ptp(qrs_subtracted, axis=0)
+        trace_spacing = max(1.0, np.nanmean(signal_magnitude) * 1.05)
+        trace_offsets = np.arange(n_channels) * trace_spacing
+        autocorrelation_scale = trace_spacing
 
+        fig, axes = plt.subplots(1, 2, figsize=(12, 10), sharex=True, sharey=True)
+        axes[0].plot(
+            time_ms,
+            qrs_subtracted + trace_offsets,
+            linewidth=1,
+            color='blue',
+        )
+        axes[0].set_title('QRS-subtracted unipolar electrograms')
+
+        autocorrelation_traces = np.column_stack(autocorrelations)
+        axes[1].plot(
+            time_ms,
+            autocorrelation_traces * autocorrelation_scale + trace_offsets,
+            linewidth=1,
+            color='blue',
+        )
         for channel_idx in range(n_channels):
-            signal_axis = axes[channel_idx, 0]
-            autocorrelation_axis = axes[channel_idx, 1]
-
-            signal_axis.plot(sample_axis, qrs_subtracted[:, channel_idx], color='blue')
-            signal_axis.set_title(f'QRS-subtracted unipolar signal (channel {channel_idx})')
-
-            autocorrelation = autocorrelations[channel_idx]
-            autocorrelation_axis.plot(lag_axis, autocorrelation, color='purple')
             if np.isfinite(cycle_length_unipolar[channel_idx]):
                 cycle_length = int(cycle_length_unipolar[channel_idx])
-                autocorrelation_axis.scatter(
-                    cycle_length,
-                    autocorrelation[cycle_length],
+                axes[1].scatter(
+                    time_ms[cycle_length],
+                    autocorrelations[channel_idx][cycle_length] * autocorrelation_scale
+                    + trace_offsets[channel_idx],
                     color='red',
+                    s=16,
+                    zorder=3,
                 )
-            autocorrelation_axis.set_title(f'Autocorrelation (channel {channel_idx})')
-            autocorrelation_axis.set_xlabel('Lag (ms)')
-            autocorrelation_axis.set_ylabel('Normalized autocorrelation')
+        axes[1].set_title('Autocorrelations')
 
+        for axis in axes:
+            axis.set_yticks(trace_offsets)
+            axis.set_yticklabels(mapping_name_unipolar, fontsize=8)
+            axis.grid(False)
+
+        axes[-1].set_xlabel('Time or lag (ms)')
+        fig.suptitle(f'find out cycle length via autocorrelation (segment id {n} of [0, {n_segment-1}])')
         fig.tight_layout()
-        plt.show()
+
+        # save the figure
+        fig_path = directory['result'] / f'autocorrelation_{n}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
 
     # for each qrs subtracted unipolar electrogram, find out the activation time by finding the peak of the maximum negative slope (dv/dt)
     if not np.isnan(cycle_lengths):
@@ -442,22 +464,22 @@ for n in range(n_segment):
     if debug_plot: # plot the before and after QRS-subtracted unipolar electrograms and the detected activation times
         sample_axis = np.arange(n_samples)
         trace_range = max(
-            np.nanmax(np.ptp(egm_unipolar_filtered, axis=0)),
-            np.nanmax(np.ptp(qrs_subtracted, axis=0)),
+            np.nanmean(np.ptp(egm_unipolar, axis=0)),
+            np.nanmean(np.ptp(qrs_subtracted, axis=0)),
         )
-        trace_spacing = max(1.0, trace_range * 1.2)
+        trace_spacing = max(1.0, trace_range * 1.05)
         trace_offsets = np.arange(n_channels) * trace_spacing
 
-        surface_signal_scaled = surface_signal_sum * (trace_range / np.ptp(surface_signal_sum)) - trace_spacing
+        surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
 
-        fig, axes = plt.subplots(1, 2, figsize=(12, max(6, 0.25 * n_channels)), sharex=True)
+        fig, axes = plt.subplots(1, 2, figsize=(10, 8), sharex=True)
         original_axis, subtracted_axis = axes
 
         for channel_idx in range(n_channels):
             offset = trace_offsets[channel_idx]
             original_axis.plot(
                 sample_axis,
-                egm_unipolar_filtered[:, channel_idx] + offset,
+                egm_unipolar[:, channel_idx] + offset,
                 color='blue',
                 linewidth=0.7,
             )
@@ -496,11 +518,15 @@ for n in range(n_segment):
         subtracted_axis.set_ylim(y_min, y_max)
 
         fig.tight_layout()
-        plt.show()
+
+        # save the figure
+        fig_path = directory['result'] / f'activation_initial_{n}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
 
     # refine activation time detections
     # ------------------------------
-    # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
+    # adaptive activation template length based on the morphology of the unipolar electrograms
     signal = egm_unipolar_filtered
     peak_indices = activation_times_unipolar
     half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
@@ -551,24 +577,24 @@ for n in range(n_segment):
     if debug_plot: # plot the original electrograms, activation template, and refined activation times
         sample_axis = np.arange(n_samples)
         trace_range = max(
-            np.nanmax(np.ptp(egm_unipolar_filtered, axis=0)),
-            np.nanmax(np.ptp(qrs_subtracted, axis=0)),
+            np.nanmean(np.ptp(egm_unipolar, axis=0)),
+            np.nanmean(np.ptp(qrs_subtracted, axis=0)),
         )
         trace_spacing = max(1.0, trace_range * 1.05)
         trace_offsets = np.arange(n_channels) * trace_spacing
 
         template_axis_offset = np.arange(n_channels) * trace_spacing
         template_x = np.arange(-half_window, half_window + 1)
-        surface_signal_scaled = surface_signal_sum * (trace_range / np.ptp(surface_signal_sum)) - trace_spacing
+        surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
 
-        fig, axes = plt.subplots(1, 3, figsize=(16, max(6, 0.25 * n_channels)), gridspec_kw={'width_ratios': [30, 1, 30]})
+        fig, axes = plt.subplots(1, 3, figsize=(12, 8), gridspec_kw={'width_ratios': [30, 1, 30]})
         original_axis, template_axis, subtracted_axis = axes
 
         for channel_idx in range(n_channels):
             offset = trace_offsets[channel_idx]
             original_axis.plot(
                 sample_axis,
-                egm_unipolar_filtered[:, channel_idx] + offset,
+                egm_unipolar[:, channel_idx] + offset,
                 color='blue',
                 linewidth=0.7,
             )
@@ -611,6 +637,7 @@ for n in range(n_segment):
         subtracted_axis.set_yticks([])
         original_axis.set_xlim(sample_axis[0], sample_axis[-1])
         template_axis.set_xlim(template_x[0], template_x[-1])
+        subtracted_axis.set_xlim(sample_axis[0], sample_axis[-1])
 
         # set the y-axis limits
         top_unipolar_egm = egm_unipolar_filtered[:, -1] + trace_offsets[-1]
@@ -626,7 +653,7 @@ for n in range(n_segment):
         plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
         plt.close()
 
-catheter['surface_ecg_sum'] = surface_ecg_sum
+catheter['surface_ecg_sum'] = surface_signal_smooth
 catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 
