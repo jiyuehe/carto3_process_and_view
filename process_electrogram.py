@@ -77,7 +77,7 @@ if debug_plot: # plot the recordings of each segment
                 recordings = recordings[:, None]
 
             channel_magnitude = np.ptp(recordings, axis=0)
-            trace_spacing = max(1.0, np.nanmax(channel_magnitude) * 1.05)
+            trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
             trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
 
             axis.plot(
@@ -136,12 +136,12 @@ for n in range(n_segment):
 
     debug_plot = 0
     if debug_plot: # show the surface ECG leads and detected QRS peaks
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(8, 8))
         n_channel = egm_surface.shape[1]
 
         # determine spacing based on signal magnitudes to separate traces visually
         per_channel_magnitude = np.ptp(egm_surface, axis=0) # peak-to-peak voltage
-        max_magnitude = np.nanmax(per_channel_magnitude) 
+        max_magnitude = np.nanmean(per_channel_magnitude) 
         spacing = max_magnitude * 1.5
         offsets = np.arange(n_channel) * spacing
 
@@ -155,7 +155,7 @@ for n in range(n_segment):
 
         ax.plot(surface_signal_sum_scaled, color='magenta', linewidth=1)
         ax.plot(surface_signal_smooth_scaled, color='blue', linewidth=1)
-        ax.scatter(qrs_peak_indices, surface_signal_sum_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
+        ax.scatter(qrs_peak_indices, surface_signal_smooth_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
         
         ax.set_xlabel('Time (ms)')
         yticks = np.concatenate(([-spacing], offsets))
@@ -164,6 +164,11 @@ for n in range(n_segment):
         ax.set_yticklabels(ylabels, fontsize=8)
         ax.set_title(f'Surface ECGs and QRS detection (segment id {n} of [0, {n_segment-1}])')
         plt.tight_layout()
+
+        # save the figure
+        fig_path = directory['result'] / f'qrs_timing_{n}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
 
     # bandpass filter the unipolar electrogram
     # ------------------------------
@@ -197,7 +202,7 @@ for n in range(n_segment):
             np.ptp(egm_unipolar, axis=0),
             np.ptp(egm_unipolar_filtered, axis=0),
         )
-        trace_spacing = max(1.0, np.nanmax(channel_magnitude) * 1.05)
+        trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
         trace_offsets = np.arange(n_channels) * trace_spacing
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 10), sharex=True, sharey=True)
@@ -213,8 +218,13 @@ for n in range(n_segment):
             axis.grid(False)
 
         axes[-1].set_xlabel('Time (ms)')
-        fig.suptitle(f'Unipolar EGM filtering (segment id {n} of [0, {n_segment-1}])')
+        fig.suptitle(f'Unipolar electrogram (segment id {n} of [0, {n_segment-1}])')
         fig.tight_layout()
+
+        # save the figure
+        fig_path = directory['result'] / f'bandpass_filter_{n}.png'
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+        plt.close(fig)
 
     # create QRS morphology template for each of the unipolar electrograms
     # ------------------------------
@@ -227,13 +237,14 @@ for n in range(n_segment):
     qrs_half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
     template_len = 2 * qrs_half_window + 1
 
+    # create a median template only when aligned beats have consistent morphology
     half_window = qrs_half_window
     qrs_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window)
 
     # subtract the QRS template from each unipolar electrogram to remove the QRS component
     # ------------------------------
     qrs_subtracted = egm_unipolar_filtered.copy()
-    qrs_taper_size = 15
+    qrs_taper_size = 10
     qrs_subtraction_window = np.ones(template_len, dtype=float)
     qrs_taper = 0.5 * (1 - np.cos(np.pi * np.arange(qrs_taper_size) / qrs_taper_size))
     qrs_subtraction_window[:qrs_taper_size] = qrs_taper
@@ -282,7 +293,12 @@ for n in range(n_segment):
         ax_mid = fig.add_subplot(gs[0, 1])
         ax_right = fig.add_subplot(gs[0, 2])
 
-        y_spacing = 2.0
+        channel_magnitude = np.maximum(
+            np.ptp(egm_unipolar, axis=0),
+            np.ptp(egm_unipolar_filtered, axis=0),
+        )
+
+        y_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
         y_offset = np.arange(n_channels) * y_spacing
 
         if len(qrs_peak_indices) > 0:
