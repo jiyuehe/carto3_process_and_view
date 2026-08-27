@@ -16,6 +16,9 @@
 import numpy as np
 from scipy.interpolate import griddata
 from scipy.signal import find_peaks
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import dijkstra
+from scipy.spatial import cKDTree
 from flask import Flask, render_template, jsonify, request
 import os
 import tempfile
@@ -25,6 +28,15 @@ import subprocess
 import time
 import configuration
 import utility
+
+
+# Do not color mesh vertices farther than this geodesic (surface) distance from
+# an electrode with a valid activation, in mesh coordinate units.
+INTERPOLATION_MAX_SURFACE_DISTANCE = 10.0
+SMOOTHING_SPATIAL_SIGMA = 2.5
+SMOOTHING_EFFECTIVE_RADIUS = 3.0 * SMOOTHING_SPATIAL_SIGMA
+SMOOTHING_HUBER_FACTOR = 1.5
+SMOOTHING_DIFFUSION_STEP = 0.5
 
 
 def estimate_electrogram_cycle_lengths(electrogram_segments):
@@ -94,6 +106,64 @@ def load_npz_values(path):
         }
 
 
+def prepare_surface_distance_data(vertices, faces, sample_points):
+    """Prepare mesh connectivity used by coverage masking and sample smoothing."""
+    vertices = np.asarray(vertices, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int64)
+    sample_points = np.asarray(sample_points, dtype=np.float64)
+
+    edges = np.concatenate(
+        (faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]), axis=0
+    )
+    edges = np.unique(np.sort(edges, axis=1), axis=0)
+    edge_lengths = np.linalg.norm(
+        vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1
+    )
+    rows = np.concatenate((edges[:, 0], edges[:, 1]))
+    columns = np.concatenate((edges[:, 1], edges[:, 0]))
+    weights = np.concatenate((edge_lengths, edge_lengths))
+    graph = coo_matrix(
+        (weights, (rows, columns)), shape=(len(vertices), len(vertices))
+    ).tocsr()
+
+    sample_vertex_indices = np.full(len(sample_points), -1, dtype=np.int32)
+    finite_samples = np.all(np.isfinite(sample_points), axis=1)
+    if np.any(finite_samples):
+        sample_vertex_indices[finite_samples] = cKDTree(vertices).query(
+            sample_points[finite_samples], workers=-1
+        )[1]
+
+    # An unweighted random-walk operator provides fast heat-kernel diffusion on
+    # this nearly uniform triangular mesh. Choose the diffusion time so its
+    # spatial standard deviation is approximately SMOOTHING_SPATIAL_SIGMA.
+    adjacency = graph.copy()
+    adjacency.data[:] = 1.0
+    degree = np.asarray(adjacency.sum(axis=1)).ravel()
+    inverse_degree = np.divide(
+        1.0, degree, out=np.zeros_like(degree), where=degree > 0
+    )
+    transition = adjacency.multiply(inverse_degree[:, None]).tocsr()
+    positive_edge_lengths = edge_lengths[edge_lengths > 0]
+    typical_edge_length = (
+        float(np.median(positive_edge_lengths))
+        if len(positive_edge_lengths) else 1.0
+    )
+    diffusion_time = 2.0 * (
+        SMOOTHING_SPATIAL_SIGMA / typical_edge_length
+    ) ** 2
+    diffusion_steps = max(
+        1, int(np.ceil(diffusion_time / SMOOTHING_DIFFUSION_STEP))
+    )
+
+    return {
+        'graph': graph,
+        'sample_vertex_indices': sample_vertex_indices,
+        'smoothing_transition': transition,
+        'smoothing_steps': diffusion_steps,
+        'smoothing_alpha': diffusion_time / diffusion_steps,
+    }
+
+
 def load_mesh_data(name_prefix):
     """Load and prepare every value used by the UI for one mesh/data set."""
     mesh = load_npz_values(directory['data'] / f'{name_prefix}_mesh.npz')
@@ -142,6 +212,16 @@ def load_mesh_data(name_prefix):
     electrode_positions_on_refined_mesh_all = np.asarray(
         mesh['electrode_positions_on_refined_mesh_all'], dtype=np.float64
     )
+    original_surface_data = prepare_surface_distance_data(
+        mesh['geometry_original_vertex'],
+        mesh['geometry_original_face'],
+        electrode_positions_on_original_mesh_all,
+    )
+    refined_surface_data = prepare_surface_distance_data(
+        mesh['vertex'],
+        mesh['face'],
+        electrode_positions_on_refined_mesh_all,
+    )
 
     return {
         'directory': directory,
@@ -157,6 +237,8 @@ def load_mesh_data(name_prefix):
         'electrode_positions_all': electrode_positions_all,
         'electrode_positions_on_original_mesh_all': electrode_positions_on_original_mesh_all,
         'electrode_positions_on_refined_mesh_all': electrode_positions_on_refined_mesh_all,
+        'original_surface_data': original_surface_data,
+        'refined_surface_data': refined_surface_data,
         'egm_uni_original': egm_uni_original,
         'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
         'egm_ref': egm_ref,
@@ -274,8 +356,148 @@ def atomic_savez(save_path, values):
         raise
 
 
-def interpolate_activation_to_mesh(activation, sample_points, mesh_vertices):
-    """Linearly interpolate valid projected electrode values in 3-D."""
+def surface_coverage_mask(valid_samples, surface_data):
+    """Find vertices within the allowed surface distance of a valid sample."""
+    sample_vertex_indices = surface_data['sample_vertex_indices']
+    mesh_graph = surface_data['graph']
+    source_vertices = np.unique(sample_vertex_indices[valid_samples])
+    source_vertices = source_vertices[source_vertices >= 0]
+    if not len(source_vertices):
+        return np.zeros(mesh_graph.shape[0], dtype=bool)
+    surface_distance = dijkstra(
+        mesh_graph,
+        directed=False,
+        indices=source_vertices,
+        limit=INTERPOLATION_MAX_SURFACE_DISTANCE,
+        min_only=True,
+    )
+    return surface_distance <= INTERPOLATION_MAX_SURFACE_DISTANCE
+
+
+def diffuse_mesh_values(values, surface_data):
+    """Apply approximate Gaussian heat diffusion to vertex channels."""
+    transition = surface_data['smoothing_transition']
+    alpha = surface_data['smoothing_alpha']
+    diffused = np.asarray(values, dtype=np.float64).copy()
+    for _ in range(surface_data['smoothing_steps']):
+        diffused += alpha * (transition @ diffused - diffused)
+    return diffused
+
+
+def aggregate_vertex_samples(values, vertex_indices, circular):
+    """Robustly merge projected samples assigned to the same mesh vertex."""
+    order = np.argsort(vertex_indices, kind='stable')
+    sorted_vertices = vertex_indices[order]
+    sorted_values = values[order]
+    source_vertices, starts = np.unique(sorted_vertices, return_index=True)
+    groups = np.split(sorted_values, starts[1:])
+
+    if not circular:
+        return source_vertices, np.asarray(
+            [np.median(group) for group in groups], dtype=np.float64
+        )
+
+    # The circular medoid is a robust analogue of the median and behaves
+    # correctly when phases straddle zero/the end of the cycle.
+    aggregated = np.empty(len(groups), dtype=np.float64)
+    for group_id, group in enumerate(groups):
+        pairwise_distance = np.abs(
+            np.mod(group[:, None] - group[None, :] + 0.5, 1.0) - 0.5
+        )
+        aggregated[group_id] = group[np.argmin(np.sum(pairwise_distance, axis=1))]
+    return source_vertices, aggregated
+
+
+def smooth_projected_samples(values, valid_samples, surface_data, circular=False):
+    """Robust geodesic Gaussian smoothing evaluated at projected samples."""
+    sample_vertex_indices = surface_data['sample_vertex_indices']
+    valid_indices = np.flatnonzero(valid_samples & (sample_vertex_indices >= 0))
+    smoothed = np.full(len(values), np.nan, dtype=np.float64)
+    if not len(valid_indices):
+        return smoothed
+
+    source_vertices, source_values = aggregate_vertex_samples(
+        np.asarray(values, dtype=np.float64)[valid_indices],
+        sample_vertex_indices[valid_indices],
+        circular,
+    )
+    vertex_count = surface_data['graph'].shape[0]
+    if circular:
+        source_angles = 2.0 * np.pi * source_values
+        source_channels = np.column_stack(
+            (np.cos(source_angles), np.sin(source_angles))
+        )
+    else:
+        source_channels = source_values[:, None]
+
+    # First pass estimates the local trend. Residuals from that trend provide
+    # Huber weights so isolated annotation errors have limited influence.
+    pilot_input = np.zeros((vertex_count, source_channels.shape[1] + 1))
+    pilot_input[source_vertices, :-1] = source_channels
+    pilot_input[source_vertices, -1] = 1.0
+    pilot = diffuse_mesh_values(pilot_input, surface_data)
+    pilot_at_sources = pilot[source_vertices, :-1] / np.maximum(
+        pilot[source_vertices, -1, None], 1e-12
+    )
+
+    if circular:
+        pilot_length = np.linalg.norm(pilot_at_sources, axis=1)
+        pilot_unit = np.divide(
+            pilot_at_sources,
+            pilot_length[:, None],
+            out=np.zeros_like(pilot_at_sources),
+            where=pilot_length[:, None] > 1e-12,
+        )
+        dot = np.sum(source_channels * pilot_unit, axis=1)
+        cross = (
+            source_channels[:, 0] * pilot_unit[:, 1]
+            - source_channels[:, 1] * pilot_unit[:, 0]
+        )
+        residual = np.abs(np.arctan2(cross, dot)) / (2.0 * np.pi)
+        minimum_huber_delta = 0.02
+    else:
+        residual = np.abs(source_values - pilot_at_sources[:, 0])
+        minimum_huber_delta = 2.0
+
+    robust_scale = 1.4826 * float(np.median(residual))
+    huber_delta = max(SMOOTHING_HUBER_FACTOR * robust_scale, minimum_huber_delta)
+    robust_weights = np.minimum(
+        1.0,
+        np.divide(
+            huber_delta,
+            residual,
+            out=np.ones_like(residual),
+            where=residual > 0,
+        ),
+    )
+
+    final_input = np.zeros_like(pilot_input)
+    final_input[source_vertices, :-1] = source_channels * robust_weights[:, None]
+    final_input[source_vertices, -1] = robust_weights
+    final = diffuse_mesh_values(final_input, surface_data)
+    final_at_sources = final[source_vertices, :-1] / np.maximum(
+        final[source_vertices, -1, None], 1e-12
+    )
+
+    if circular:
+        smoothed_source_values = np.mod(
+            np.arctan2(final_at_sources[:, 1], final_at_sources[:, 0])
+            / (2.0 * np.pi),
+            1.0,
+        )
+    else:
+        smoothed_source_values = final_at_sources[:, 0]
+
+    source_lookup = np.full(vertex_count, np.nan, dtype=np.float64)
+    source_lookup[source_vertices] = smoothed_source_values
+    smoothed[valid_indices] = source_lookup[sample_vertex_indices[valid_indices]]
+    return smoothed
+
+
+def interpolate_activation_to_mesh(
+    activation, sample_points, mesh_vertices, surface_data
+):
+    """Interpolate electrode values, masking mesh regions without nearby data."""
     activation = np.asarray(activation, dtype=np.float64)
     mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
@@ -286,11 +508,26 @@ def interpolate_activation_to_mesh(activation, sample_points, mesh_vertices):
     if not np.any(valid):
         return np.full(len(mesh_vertices), np.nan)
 
-    return griddata(sample_points[valid], activation[valid], mesh_vertices, method='linear')
+    smoothed_activation = smooth_projected_samples(
+        activation, valid, surface_data, circular=False
+    )
+    mesh_activation = griddata(
+        sample_points[valid],
+        smoothed_activation[valid],
+        mesh_vertices,
+        method='linear',
+    )
+    covered = surface_coverage_mask(valid, surface_data)
+    mesh_activation[~covered] = np.nan
+    return mesh_activation
 
 
 def interpolate_activation_phase_to_mesh(
-    activation, cycle_length, sample_points, mesh_vertices
+    activation,
+    cycle_length,
+    sample_points,
+    mesh_vertices,
+    surface_data,
 ):
     """Circularly interpolate activation phase for the Full HSV colorscale."""
     activation = np.asarray(activation, dtype=np.float64)
@@ -306,11 +543,19 @@ def interpolate_activation_phase_to_mesh(
 
     phase_origin = float(np.min(activation[valid]))
     phase = np.mod((activation[valid] - phase_origin) / cycle_length, 1.0)
-    angles = 2.0 * np.pi * phase
+    all_phase = np.full(len(activation), np.nan, dtype=np.float64)
+    all_phase[valid] = phase
+    smoothed_phase = smooth_projected_samples(
+        all_phase, valid, surface_data, circular=True
+    )
+    angles = 2.0 * np.pi * smoothed_phase[valid]
     phase_vectors = np.column_stack((np.cos(angles), np.sin(angles)))
     mesh_vectors = griddata(
         sample_points[valid], phase_vectors, mesh_vertices, method='linear'
     )
+    mesh_vectors[
+        ~surface_coverage_mask(valid, surface_data)
+    ] = np.nan
 
     confidence = np.hypot(mesh_vectors[:, 0], mesh_vectors[:, 1])
     mesh_phase = np.mod(
@@ -425,9 +670,11 @@ def interpolate_activation():
     if mesh_type == 'refined':
         mesh_vertices = data_store['refined_mesh_vertex']
         sample_points = data_store['electrode_positions_on_refined_mesh_all']
+        surface_data = data_store['refined_surface_data']
     else:
         mesh_vertices = data_store['mesh_vertex']
         sample_points = data_store['electrode_positions_on_original_mesh_all']
+        surface_data = data_store['original_surface_data']
     # Accept either a flattened per-electrode activation array ('activation_all')
     # or a per-segment activation ('activation_uni') together with 'segment_id'.
     if 'activation_all' in payload:
@@ -459,7 +706,11 @@ def interpolate_activation():
         if not np.isfinite(cycle_length) or cycle_length <= 0:
             return jsonify({'error': 'cycle length must be a positive number'}), 422
         mesh_phase, phase_confidence, phase_origin = interpolate_activation_phase_to_mesh(
-            activation_all, cycle_length, sample_points, mesh_vertices
+            activation_all,
+            cycle_length,
+            sample_points,
+            mesh_vertices,
+            surface_data,
         )
         return jsonify(utility.ui_functions.json_safe({
             'mesh_phase': [None if not np.isfinite(value) else float(value)
@@ -471,7 +722,10 @@ def interpolate_activation():
         }))
 
     mesh_activation = interpolate_activation_to_mesh(
-        activation_all, sample_points, mesh_vertices
+        activation_all,
+        sample_points,
+        mesh_vertices,
+        surface_data,
     )
     return jsonify(utility.ui_functions.json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)

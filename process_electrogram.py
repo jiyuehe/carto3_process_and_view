@@ -715,6 +715,7 @@ electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electr
     normal_vicinity=projection_normal_vicinity,
     projection_max_distance=projection_max_distance,
 )
+
 original_rejected_count = np.count_nonzero(
     ~np.all(np.isfinite(electrode_positions_on_original_mesh_all), axis=1)
 )
