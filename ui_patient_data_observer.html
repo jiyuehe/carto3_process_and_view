@@ -43,6 +43,11 @@
         
         <div class="visualization-container">
             <div class="plot-3d-wrapper">
+                <div class="mesh-selector-row">
+                    <label for="meshSelector">Mesh</label>
+                    <select id="meshSelector" aria-label="Select mesh data"></select>
+                    <span id="meshLoadStatus" class="mesh-load-status" role="status" aria-live="polite"></span>
+                </div>
                 <div id="mesh_and_electrode" class="plot-3d"></div>
             </div>
             <div class="egm-section">
@@ -85,6 +90,7 @@
         const editedSegmentIds = new Set();
         let isSaving = false;
         let isUpdatingWoi = false;
+        let isSwitchingMesh = false;
 
         function setSaveStatus(message, type = '') {
             const status = document.getElementById('saveStatus');
@@ -99,7 +105,7 @@
                 document.querySelector('.activation-input[aria-invalid="true"]')
             );
             saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
-            saveButton.disabled = !appData || isSaving || isUpdatingWoi
+            saveButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
                 || hasInvalidActivation || editCount === 0;
         }
 
@@ -113,6 +119,7 @@
             document.getElementById('toggleLatest').disabled = saving;
             document.getElementById('woiStart').disabled = saving;
             document.getElementById('woiEnd').disabled = saving;
+            document.getElementById('meshSelector').disabled = saving;
 
             if (saving) {
                 setSliderEnabled(false);
@@ -184,18 +191,20 @@
             appData.mesh_activation = meshVertices.map(() => null);
             appData.mesh_phase = meshVertices.map(() => null);
         }
-        // Load data on page load
-        async function loadData() {
-            const response = await fetch('/api/data');
-            appData = await response.json();
-            if (!response.ok) {
-                throw new Error(appData.error || `HTTP ${response.status}`);
-            }
+        function applyLoadedMeshData(loadedData, populateMeshOptions = false) {
+            appData = loadedData;
+            currentSegmentIndex = 0;
 
-            if (appData.segment_count > 0) {
-                currentSegmentIndex = 0;
+            const meshSelector = document.getElementById('meshSelector');
+            if (populateMeshOptions) {
+                meshSelector.replaceChildren(...appData.mesh_names.map(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    return option;
+                }));
             }
-
+            meshSelector.value = appData.name_prefix;
             initializeSlider();
             document.getElementById('woiStart').value = appData.clinical_electrogram_woi_start;
             document.getElementById('woiEnd').value = appData.clinical_electrogram_woi_end;
@@ -207,6 +216,73 @@
             renderElectrogram();
             updateSaveButton();
         }
+
+        // Load data on page load
+        async function loadData() {
+            const response = await fetch('/api/data');
+            const loadedData = await response.json();
+            if (!response.ok) {
+                throw new Error(loadedData.error || `HTTP ${response.status}`);
+            }
+            applyLoadedMeshData(loadedData, true);
+        }
+
+        document.getElementById('meshSelector').addEventListener('change', async (event) => {
+            if (!appData || isSwitchingMesh || isSaving || isUpdatingWoi) {
+                event.target.value = appData?.name_prefix || '';
+                return;
+            }
+
+            const selectedName = event.target.value;
+            const previousName = appData.name_prefix;
+            if (selectedName === previousName) return;
+            if (editedSegmentIds.size > 0 && !window.confirm(
+                'Changing meshes will discard all unsaved activation edits. Continue?'
+            )) {
+                event.target.value = previousName;
+                return;
+            }
+
+            const status = document.getElementById('meshLoadStatus');
+            isSwitchingMesh = true;
+            event.target.disabled = true;
+            updateSaveButton();
+            status.textContent = 'Loading…';
+            electrogramRequestId++;
+            interpolationRequestId++;
+
+            try {
+                const response = await fetch('/api/select-mesh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name_prefix: selectedName })
+                });
+                const loadedData = await response.json();
+                if (!response.ok) {
+                    throw new Error(loadedData.error || `HTTP ${response.status}`);
+                }
+
+                editedSegmentIds.clear();
+                document.getElementById('toggleEarliest').checked = false;
+                document.getElementById('toggleLatest').checked = false;
+                setSliderEnabled(true);
+                setSaveStatus('');
+                applyLoadedMeshData(loadedData);
+                status.textContent = '';
+
+                if (document.getElementById('toggleInterpolateMesh').checked) {
+                    refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+                }
+            } catch (err) {
+                event.target.value = previousName;
+                status.textContent = `Load failed: ${err.message}`;
+                console.error('Failed to change mesh:', err);
+            } finally {
+                isSwitchingMesh = false;
+                event.target.disabled = false;
+                updateSaveButton();
+            }
+        });
 
         async function fetchElectrogramData(segmentId) {
             const response = await fetch('/api/electrograms', {
@@ -591,10 +667,6 @@
             };
 
             const layout = {
-                title: {
-                    text: appData.name_prefix,
-                    font: { size: 12 }
-                },
                 dragmode: 'orbit',
                 scene: {
                     xaxis: { visible: false },
@@ -602,7 +674,7 @@
                     zaxis: { visible: false },
                     aspectmode: 'data'
                 },
-                margin: { l: 0, r: 0, t: 40, b: 0 },
+                margin: { l: 0, r: 0, t: 0, b: 0 },
                 showlegend: true,
                 legend: { x: 0, y: 1 },
                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -921,7 +993,7 @@
         }
 
         function updateSliderLabel() {
-            const segmentLabel = appData.segment_count > 0 ? `${currentSegmentIndex + 1}/${appData.segment_count}` : '0/0';
+            const segmentLabel = appData.segment_count > 0 ? `${currentSegmentIndex} [0,${appData.segment_count}]` : '0/0';
             document.getElementById('pageLabel').textContent = `Segment ${segmentLabel}`;
         }
 
@@ -1202,7 +1274,7 @@
                 const response = await fetch('/api/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ segments })
+                    body: JSON.stringify({ name_prefix: appData.name_prefix, segments })
                 });
                 const responseText = await response.text();
                 let result = {};

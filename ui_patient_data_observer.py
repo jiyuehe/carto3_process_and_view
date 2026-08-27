@@ -70,83 +70,118 @@ def estimate_electrogram_cycle_lengths(electrogram_segments):
 #%%
 # setting
 directory = configuration.directory_setup()
-name_prefix = configuration.map_name()
+save_lock = threading.RLock()
 
-# load map data
-data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
-mesh = {
-    k: (data[k].item() if isinstance(data[k], np.ndarray) and data[k].ndim == 0 else data[k])
-    for k in data.files
-}
 
-data = np.load(directory['data'] / f'{name_prefix}_catheter.npz', allow_pickle=True)
-catheter = {
-    k: (data[k].item() if isinstance(data[k], np.ndarray) and data[k].ndim == 0 else data[k])
-    for k in data.files
-}
+def available_mesh_names():
+    """Return catheter data sets that also have the mesh data required by the UI."""
+    suffix = '_catheter.npz'
+    names = []
+    for catheter_path in directory['data'].glob(f'*{suffix}'):
+        name = catheter_path.name[:-len(suffix)]
+        if (directory['data'] / f'{name}_mesh.npz').is_file():
+            names.append(name)
+    return sorted(names, key=str.casefold)
 
-# variable to store data
-electrode_positions = np.asarray(mesh['electrode_positions'], dtype=object) # shape is (n_segments,)
-segment_count = len(electrode_positions)
-segment_electrode_count = int(electrode_positions[0].shape[0])
-egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
-egm_uni_qrs_subtracted = np.asarray(catheter.get('mapping_electrogram_unipolar_qrs_subtracted', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
-egm_ref = np.asarray(catheter.get('surface_ecg_sum', []), dtype=object) # shape is (n_segments, n_samples)
-activation_uni = np.asarray(catheter.get('mapping_electrogram_unipolar_activation_within_woi', []), dtype=object) # shape is (n_segments, n_electrodes)
 
-electrogram_cycle_lengths = estimate_electrogram_cycle_lengths(egm_uni_qrs_subtracted)
-median_cycle_length = (
-    float(np.median(electrogram_cycle_lengths))
-    if electrogram_cycle_lengths.size else np.nan
-)
-print(
-    f'Estimated median cycle length: {median_cycle_length:g} samples '
-    f'from {electrogram_cycle_lengths.size} electrograms'
-)
+def load_npz_values(path):
+    with np.load(path, allow_pickle=True) as loaded:
+        return {
+            key: (loaded[key].item()
+                  if isinstance(loaded[key], np.ndarray) and loaded[key].ndim == 0
+                  else loaded[key])
+            for key in loaded.files
+        }
 
-#%%
-# Flatten electrode positions, then project them independently onto each mesh.
-electrode_positions_all = np.vstack([
-    np.asarray(segment, dtype=float).reshape(-1, 3)
-    for segment in electrode_positions
-])
-print('Projecting electrode positions onto original and refined meshes')
-electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
-    np.asarray(mesh['geometry_original_vertex'], dtype=np.float64),
-    np.asarray(mesh['geometry_original_face'], dtype=np.int64),
-    electrode_positions_all,
-)
-electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
-    np.asarray(mesh['vertex'], dtype=np.float64),
-    np.asarray(mesh['face'], dtype=np.int64),
-    electrode_positions_all,
-)
 
-data_store = {
-    'directory': directory,
-    'name_prefix': name_prefix,
-    'clinical_data': catheter,
-    'mesh_vertex': mesh['geometry_original_vertex'],
-    'mesh_face': mesh['geometry_original_face'],
-    'refined_mesh_vertex': mesh['vertex'],
-    'refined_mesh_face': mesh['face'],
-    'segment_count': segment_count,
-    'segment_electrode_count': segment_electrode_count,
-    'electrode_positions': electrode_positions,
-    'electrode_positions_all': electrode_positions_all,
-    'electrode_positions_on_original_mesh_all': electrode_positions_on_original_mesh_all,
-    'electrode_positions_on_refined_mesh_all': electrode_positions_on_refined_mesh_all,
-    'egm_uni_original': egm_uni_original,
-    'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
-    'egm_ref': egm_ref,
-    'activation_uni': activation_uni,
-    'electrogram_cycle_lengths': electrogram_cycle_lengths,
-    'median_cycle_length': median_cycle_length,
-    'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
-    'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
-}
+def load_mesh_data(name_prefix):
+    """Load and prepare every value used by the UI for one mesh/data set."""
+    mesh = load_npz_values(directory['data'] / f'{name_prefix}_mesh.npz')
+    catheter = load_npz_values(directory['data'] / f'{name_prefix}_catheter.npz')
 
-save_lock = threading.Lock()
+    electrode_positions = np.asarray(mesh['electrode_positions'], dtype=object)
+    segment_count = len(electrode_positions)
+    segment_electrode_count = (
+        int(electrode_positions[0].shape[0]) if segment_count else 0
+    )
+    egm_uni_original = np.asarray(
+        catheter.get('mapping_electrogram_unipolar', []), dtype=object
+    )
+    egm_uni_qrs_subtracted = np.asarray(
+        catheter.get('mapping_electrogram_unipolar_qrs_subtracted', []), dtype=object
+    )
+    egm_ref = np.asarray(catheter.get('surface_ecg_sum', []), dtype=object)
+    activation_uni = np.asarray(
+        catheter.get('mapping_electrogram_unipolar_activation_within_woi', []),
+        dtype=object,
+    )
+
+    electrogram_cycle_lengths = estimate_electrogram_cycle_lengths(
+        egm_uni_qrs_subtracted
+    )
+    median_cycle_length = (
+        float(np.median(electrogram_cycle_lengths))
+        if electrogram_cycle_lengths.size else np.nan
+    )
+    print(
+        f'{name_prefix}: estimated median cycle length '
+        f'{median_cycle_length:g} samples from '
+        f'{electrogram_cycle_lengths.size} electrograms'
+    )
+
+    electrode_positions_all = (
+        np.vstack([
+            np.asarray(segment, dtype=float).reshape(-1, 3)
+            for segment in electrode_positions
+        ])
+        if segment_count else np.empty((0, 3), dtype=float)
+    )
+    print(f'{name_prefix}: projecting electrode positions onto both meshes')
+    electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+        np.asarray(mesh['geometry_original_vertex'], dtype=np.float64),
+        np.asarray(mesh['geometry_original_face'], dtype=np.int64),
+        electrode_positions_all,
+    )
+    electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+        np.asarray(mesh['vertex'], dtype=np.float64),
+        np.asarray(mesh['face'], dtype=np.int64),
+        electrode_positions_all,
+    )
+
+    return {
+        'directory': directory,
+        'name_prefix': name_prefix,
+        'clinical_data': catheter,
+        'mesh_vertex': mesh['geometry_original_vertex'],
+        'mesh_face': mesh['geometry_original_face'],
+        'refined_mesh_vertex': mesh['vertex'],
+        'refined_mesh_face': mesh['face'],
+        'segment_count': segment_count,
+        'segment_electrode_count': segment_electrode_count,
+        'electrode_positions': electrode_positions,
+        'electrode_positions_all': electrode_positions_all,
+        'electrode_positions_on_original_mesh_all': electrode_positions_on_original_mesh_all,
+        'electrode_positions_on_refined_mesh_all': electrode_positions_on_refined_mesh_all,
+        'egm_uni_original': egm_uni_original,
+        'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
+        'egm_ref': egm_ref,
+        'activation_uni': activation_uni,
+        'electrogram_cycle_lengths': electrogram_cycle_lengths,
+        'median_cycle_length': median_cycle_length,
+        'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
+        'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
+    }
+
+
+mesh_names = available_mesh_names()
+if not mesh_names:
+    raise FileNotFoundError(
+        f'No matching *_catheter.npz and *_mesh.npz files found in {directory["data"]}'
+    )
+initial_mesh_name = configuration.map_name()
+if initial_mesh_name not in mesh_names:
+    initial_mesh_name = mesh_names[0]
+data_store = load_mesh_data(initial_mesh_name)
 
 
 def validate_activation_updates(payload):
@@ -291,20 +326,21 @@ def interpolate_activation_phase_to_mesh(
     return mesh_phase, confidence, phase_origin
 
 app = Flask(__name__, template_folder=directory['home'], static_folder=directory['home'], static_url_path='')
-@app.route('/')
-def index():
-    return render_template('ui_patient_data_observer.html')
 
-@app.route('/api/data')
-def get_data():
-    # Keep initial payload lightweight; electrograms are fetched on demand.
-    data = {
+
+def ui_data_payload():
+    """Build the initial browser payload for the currently selected mesh."""
+    return {
         'name_prefix': data_store['name_prefix'],
+        'mesh_names': mesh_names,
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
         'refined_mesh_vertex': data_store['refined_mesh_vertex'].tolist(),
         'refined_mesh_face': data_store['refined_mesh_face'].tolist(),
-        'electrode_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['electrode_positions']],
+        'electrode_positions': [
+            np.asarray(segment, dtype=float).tolist()
+            for segment in data_store['electrode_positions']
+        ],
         'mesh_activation': [None] * len(data_store['refined_mesh_vertex']),
         'mesh_phase': [None] * len(data_store['refined_mesh_vertex']),
         'median_cycle_length': (
@@ -314,14 +350,48 @@ def get_data():
         'cycle_length_electrogram_count': int(len(data_store['electrogram_cycle_lengths'])),
         'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),
-        'activation_uni': [np.asarray(seg, dtype=float).tolist() for seg in data_store['activation_uni']],
+        'activation_uni': [
+            np.asarray(segment, dtype=float).tolist()
+            for segment in data_store['activation_uni']
+        ],
         'segment_count': int(data_store['segment_count']),
         'segment_electrode_count': int(data_store['segment_electrode_count']),
         'n_segments': int(data_store['segment_count']),
-        'n_electrodes': int(data_store['segment_electrode_count'])
+        'n_electrodes': int(data_store['segment_electrode_count']),
     }
 
-    return jsonify(utility.ui_functions.json_safe(data))
+
+@app.route('/')
+def index():
+    return render_template('ui_patient_data_observer.html')
+
+@app.route('/api/data')
+def get_data():
+    # Keep initial payload lightweight; electrograms are fetched on demand.
+    return jsonify(utility.ui_functions.json_safe(ui_data_payload()))
+
+
+@app.route('/api/select-mesh', methods=['POST'])
+def select_mesh():
+    global data_store
+
+    payload = request.get_json(silent=True) or {}
+    name_prefix = payload.get('name_prefix')
+    if not isinstance(name_prefix, str) or name_prefix not in mesh_names:
+        return jsonify({'error': 'Unknown mesh name'}), 400
+
+    if name_prefix != data_store['name_prefix']:
+        try:
+            # Prepare everything before replacing the shared store. Other requests
+            # therefore see either the complete old data set or the complete new one.
+            new_data_store = load_mesh_data(name_prefix)
+        except Exception:
+            app.logger.exception('Failed to load mesh data for %s', name_prefix)
+            return jsonify({'error': f'Unable to load data for {name_prefix}'}), 500
+        with save_lock:
+            data_store = new_data_store
+
+    return jsonify(utility.ui_functions.json_safe(ui_data_payload()))
 
 @app.route('/api/electrograms', methods=['POST'])
 def get_electrograms():
@@ -468,15 +538,22 @@ def update_window_of_interest():
 @app.route('/api/save', methods=['POST'])
 def save_activation_times():
     payload = request.get_json(silent=True) or {}
-    try:
-        updates = validate_activation_updates(payload)
-    except ValueError as exc:
-        return jsonify({'error': str(exc)}), 400
-
-    activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
-    save_path = data_store['directory']['data'] / f"{data_store['name_prefix']}_catheter.npz"
 
     with save_lock:
+        if payload.get('name_prefix') != data_store['name_prefix']:
+            return jsonify({
+                'error': 'The selected mesh changed before this save was processed'
+            }), 409
+        try:
+            updates = validate_activation_updates(payload)
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
+        save_path = (
+            data_store['directory']['data']
+            / f"{data_store['name_prefix']}_catheter.npz"
+        )
         clinical_data = data_store['clinical_data']
         updated_activation = updated_activation_array(clinical_data[activation_key], updates)
         data_to_save = dict(clinical_data)
