@@ -66,6 +66,11 @@
                         <span class="toggle-slider"></span>
                         <span class="toggle-text">Interpolate to Mesh</span>
                     </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggleRefinedMesh" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text" id="meshTypeLabel">Refined Mesh</span>
+                    </label>
                 </div>
             </div>
         </div>
@@ -153,6 +158,31 @@
                 }
             }
             return all;
+        }
+
+        function isRefinedMeshSelected() {
+            return document.getElementById('toggleRefinedMesh').checked;
+        }
+
+        function getCurrentMeshVertices() {
+            if (!appData) return [];
+            return isRefinedMeshSelected()
+                ? (appData.refined_mesh_vertex || [])
+                : (appData.mesh_vertex || []);
+        }
+
+        function getCurrentMeshFaces() {
+            if (!appData) return [];
+            return isRefinedMeshSelected()
+                ? (appData.refined_mesh_face || [])
+                : (appData.mesh_face || []);
+        }
+
+        function clearMeshInterpolation() {
+            if (!appData) return;
+            const meshVertices = getCurrentMeshVertices();
+            appData.mesh_activation = meshVertices.map(() => null);
+            appData.mesh_phase = meshVertices.map(() => null);
         }
         // Load data on page load
         async function loadData() {
@@ -316,11 +346,11 @@
         }
 
         function interpolateMeshActivation(activation) {
-            return appData.mesh_activation || appData.mesh_vertex.map(() => null);
+            return appData.mesh_activation || getCurrentMeshVertices().map(() => null);
         }
 
         function interpolateMeshPhase() {
-            return appData.mesh_phase || appData.mesh_vertex.map(() => null);
+            return appData.mesh_phase || getCurrentMeshVertices().map(() => null);
         }
 
         async function refreshMeshInterpolation() {
@@ -328,7 +358,8 @@
             const payloadBody = {
                 activation_all: getAllActivations(),
                 full_hsv: document.getElementById('toggleFullHue').checked,
-                cycle_length: appData.median_cycle_length
+                cycle_length: appData.median_cycle_length,
+                mesh_type: isRefinedMeshSelected() ? 'refined' : 'original'
             };
             const response = await fetch('/api/interpolate', {
                 method: 'POST',
@@ -338,16 +369,21 @@
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
             if (requestId !== interpolationRequestId) return;
+            const meshVertices = getCurrentMeshVertices();
             if (payloadBody.full_hsv) {
                 if (!Array.isArray(payload.mesh_phase)
-                        || payload.mesh_phase.length !== appData.mesh_vertex.length) {
+                        || payload.mesh_phase.length !== meshVertices.length) {
                     throw new Error('Full HSV phase data is missing; restart the Python server.');
                 }
                 appData.mesh_phase = payload.mesh_phase;
-                appData.mesh_activation = appData.mesh_vertex.map(() => null);
+                appData.mesh_activation = meshVertices.map(() => null);
             } else {
+                if (!Array.isArray(payload.mesh_activation)
+                        || payload.mesh_activation.length !== meshVertices.length) {
+                    throw new Error('Mesh activation data is missing; restart the Python server.');
+                }
                 appData.mesh_activation = payload.mesh_activation;
-                appData.mesh_phase = appData.mesh_vertex.map(() => null);
+                appData.mesh_phase = meshVertices.map(() => null);
             }
             if (payloadBody.full_hsv) {
                 // Rebuild the mesh so Plotly switches cleanly from its initial
@@ -455,8 +491,8 @@
             const meshColors = getMeshColorSettings(meshActivation, meshPhase, activationRange);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
 
-            const meshVertices = appData.mesh_vertex || [];
-            const meshFaces = appData.mesh_face || [];
+            const meshVertices = getCurrentMeshVertices();
+            const meshFaces = getCurrentMeshFaces();
             const atriumTrace = {
                 type: 'mesh3d',
                 x: meshVertices.map(p => p[0]),
@@ -1085,8 +1121,7 @@
                 appData.clinical_electrogram_woi_start = payload.clinical_electrogram_woi_start;
                 appData.clinical_electrogram_woi_end = payload.clinical_electrogram_woi_end;
                 appData.activation_uni = payload.activation_uni;
-                appData.mesh_activation = appData.mesh_vertex.map(() => null);
-                appData.mesh_phase = appData.mesh_vertex.map(() => null);
+                clearMeshInterpolation();
                 for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
                     editedSegmentIds.add(segmentId);
                 }
@@ -1134,6 +1169,19 @@
             const showMesh = e.target.checked;
             Plotly.restyle(plot, { visible: showMesh }, [0]);
             if (showMesh) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+            }
+        });
+
+        document.getElementById('toggleRefinedMesh').addEventListener('change', (e) => {
+            document.getElementById('meshTypeLabel').textContent = e.target.checked
+                ? 'Refined Mesh'
+                : 'Original Mesh';
+            if (!appData) return;
+            interpolationRequestId++;
+            clearMeshInterpolation();
+            render3DPlot(true);
+            if (document.getElementById('toggleInterpolateMesh').checked) {
                 refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
             }
         });

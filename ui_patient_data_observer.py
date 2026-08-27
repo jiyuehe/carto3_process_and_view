@@ -87,7 +87,6 @@ catheter = {
 
 # variable to store data
 electrode_positions = np.asarray(mesh['electrode_positions'], dtype=object) # shape is (n_segments,)
-electrode_positions_on_mesh = np.asarray(mesh['electrode_positions_on_mesh'], dtype=object) # shape is (n_segments,)
 segment_count = len(electrode_positions)
 segment_electrode_count = int(electrode_positions[0].shape[0])
 egm_uni_original = np.asarray(catheter.get('mapping_electrogram_unipolar', []), dtype=object) # shape is (n_segments, n_samples, n_electrodes)
@@ -106,15 +105,22 @@ print(
 )
 
 #%%
-# grab all pre-computed electrode positions across all segments
+# Flatten electrode positions, then project them independently onto each mesh.
 electrode_positions_all = np.vstack([
     np.asarray(segment, dtype=float).reshape(-1, 3)
     for segment in electrode_positions
 ])
-electrode_positions_on_mesh_all = np.vstack([
-    np.asarray(segment, dtype=float).reshape(-1, 3)
-    for segment in electrode_positions_on_mesh
-])
+print('Projecting electrode positions onto original and refined meshes')
+electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+    np.asarray(mesh['geometry_original_vertex'], dtype=np.float64),
+    np.asarray(mesh['geometry_original_face'], dtype=np.int64),
+    electrode_positions_all,
+)
+electrode_positions_on_refined_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
+    np.asarray(mesh['vertex'], dtype=np.float64),
+    np.asarray(mesh['face'], dtype=np.int64),
+    electrode_positions_all,
+)
 
 data_store = {
     'directory': directory,
@@ -128,8 +134,8 @@ data_store = {
     'segment_electrode_count': segment_electrode_count,
     'electrode_positions': electrode_positions,
     'electrode_positions_all': electrode_positions_all,
-    'electrode_positions_on_mesh': electrode_positions_on_mesh,
-    'electrode_positions_on_mesh_all': electrode_positions_on_mesh_all,
+    'electrode_positions_on_original_mesh_all': electrode_positions_on_original_mesh_all,
+    'electrode_positions_on_refined_mesh_all': electrode_positions_on_refined_mesh_all,
     'egm_uni_original': egm_uni_original,
     'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
     'egm_ref': egm_ref,
@@ -238,31 +244,31 @@ def atomic_savez(save_path, values):
         raise
 
 
-def interpolate_activation_to_mesh(activation):
+def interpolate_activation_to_mesh(activation, sample_points, mesh_vertices):
     """Linearly interpolate valid projected electrode values in 3-D."""
     activation = np.asarray(activation, dtype=np.float64)
-    sample_points = np.asarray(
-        data_store['electrode_positions_on_mesh_all'], dtype=np.float64
-    )
+    mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
+    sample_points = np.asarray(sample_points, dtype=np.float64)
     valid = np.isfinite(activation) & (activation != 0) & np.all(
         np.isfinite(sample_points), axis=1
     )
     if not np.any(valid):
-        return np.full(len(data_store['mesh_vertex']), np.nan)
+        return np.full(len(mesh_vertices), np.nan)
 
-    return griddata(sample_points[valid], activation[valid], data_store['mesh_vertex'], method='linear')
+    return griddata(sample_points[valid], activation[valid], mesh_vertices, method='linear')
 
 
-def interpolate_activation_phase_to_mesh(activation, cycle_length):
+def interpolate_activation_phase_to_mesh(
+    activation, cycle_length, sample_points, mesh_vertices
+):
     """Circularly interpolate activation phase for the Full HSV colorscale."""
     activation = np.asarray(activation, dtype=np.float64)
-    sample_points = np.asarray(
-        data_store['electrode_positions_on_mesh_all'], dtype=np.float64
-    )
+    mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
+    sample_points = np.asarray(sample_points, dtype=np.float64)
     valid = np.isfinite(activation) & (activation != 0) & np.all(
         np.isfinite(sample_points), axis=1
     )
-    empty = np.full(len(data_store['mesh_vertex']), np.nan)
+    empty = np.full(len(mesh_vertices), np.nan)
     if not np.any(valid) or not np.isfinite(cycle_length) or cycle_length <= 0:
         return empty, empty.copy(), np.nan
 
@@ -271,7 +277,7 @@ def interpolate_activation_phase_to_mesh(activation, cycle_length):
     angles = 2.0 * np.pi * phase
     phase_vectors = np.column_stack((np.cos(angles), np.sin(angles)))
     mesh_vectors = griddata(
-        sample_points[valid], phase_vectors, data_store['mesh_vertex'], method='linear'
+        sample_points[valid], phase_vectors, mesh_vertices, method='linear'
     )
 
     confidence = np.hypot(mesh_vectors[:, 0], mesh_vectors[:, 1])
@@ -296,13 +302,11 @@ def get_data():
         'name_prefix': data_store['name_prefix'],
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
+        'refined_mesh_vertex': data_store['refined_mesh_vertex'].tolist(),
+        'refined_mesh_face': data_store['refined_mesh_face'].tolist(),
         'electrode_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['electrode_positions']],
-        'electrode_positions_on_mesh': [
-            np.asarray(seg, dtype=float).tolist()
-            for seg in data_store['electrode_positions_on_mesh']
-        ],
-        'mesh_activation': [None] * len(data_store['mesh_vertex']),
-        'mesh_phase': [None] * len(data_store['mesh_vertex']),
+        'mesh_activation': [None] * len(data_store['refined_mesh_vertex']),
+        'mesh_phase': [None] * len(data_store['refined_mesh_vertex']),
         'median_cycle_length': (
             float(data_store['median_cycle_length'])
             if np.isfinite(data_store['median_cycle_length']) else None
@@ -348,6 +352,15 @@ def get_electrograms():
 @app.route('/api/interpolate', methods=['POST'])
 def interpolate_activation():
     payload = request.get_json(silent=True) or {}
+    mesh_type = payload.get('mesh_type', 'refined')
+    if mesh_type not in ('original', 'refined'):
+        return jsonify({'error': 'mesh_type must be original or refined'}), 400
+    if mesh_type == 'refined':
+        mesh_vertices = data_store['refined_mesh_vertex']
+        sample_points = data_store['electrode_positions_on_refined_mesh_all']
+    else:
+        mesh_vertices = data_store['mesh_vertex']
+        sample_points = data_store['electrode_positions_on_original_mesh_all']
     # Accept either a flattened per-electrode activation array ('activation_all')
     # or a per-segment activation ('activation_uni') together with 'segment_id'.
     if 'activation_all' in payload:
@@ -379,7 +392,7 @@ def interpolate_activation():
         if not np.isfinite(cycle_length) or cycle_length <= 0:
             return jsonify({'error': 'cycle length must be a positive number'}), 422
         mesh_phase, phase_confidence, phase_origin = interpolate_activation_phase_to_mesh(
-            activation_all, cycle_length
+            activation_all, cycle_length, sample_points, mesh_vertices
         )
         return jsonify(utility.ui_functions.json_safe({
             'mesh_phase': [None if not np.isfinite(value) else float(value)
@@ -390,7 +403,9 @@ def interpolate_activation():
             'cycle_length': float(cycle_length),
         }))
 
-    mesh_activation = interpolate_activation_to_mesh(activation_all)
+    mesh_activation = interpolate_activation_to_mesh(
+        activation_all, sample_points, mesh_vertices
+    )
     return jsonify(utility.ui_functions.json_safe({
         'mesh_activation': [None if not np.isfinite(value) else float(value)
                             for value in mesh_activation]

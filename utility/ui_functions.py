@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 # find the closest point on each triangle to a single 3-D point
 def closest_points_on_triangles(point, triangles):
@@ -68,28 +69,22 @@ def closest_points_on_triangles(point, triangles):
 
     return result
 
-# memory-bounded NumPy k-nearest-neighbour search
+# k-nearest-neighbour search backed by a spatial index
 def nearest_indices(query, reference, count, block_size=256):
+    del block_size  # Retained for compatibility with existing callers.
     count = min(count, len(reference))
-    reference_sq = np.einsum('ij,ij->i', reference, reference)
-    indices = np.empty((len(query), count), dtype=np.int32)
-    distances_sq = np.empty((len(query), count), dtype=np.float64)
-    for start in range(0, len(query), block_size):
-        stop = min(start + block_size, len(query))
-        q = query[start:stop]
-        distance = (
-            np.einsum('ij,ij->i', q, q)[:, None]
-            + reference_sq[None, :]
-            - 2.0 * q @ reference.T
+    if count == 0:
+        return (
+            np.empty((len(query), 0), dtype=np.int32),
+            np.empty((len(query), 0), dtype=np.float64),
         )
-        np.maximum(distance, 0, out=distance)
-        nearest = np.argpartition(distance, count - 1, axis=1)[:, :count]
-        nearest_distance = np.take_along_axis(distance, nearest, axis=1)
-        order = np.argsort(nearest_distance, axis=1)
-        indices[start:stop] = np.take_along_axis(nearest, order, axis=1)
-        distances_sq[start:stop] = np.take_along_axis(nearest_distance, order, axis=1)
-        
-    return indices, distances_sq
+
+    distances, indices = cKDTree(reference).query(query, k=count, workers=-1)
+    # scipy squeezes the neighbour dimension when k == 1.
+    if count == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+    return indices.astype(np.int32, copy=False), np.square(distances)
 
 def project_electrodes_to_mesh(vertices, faces, electrodes):
     # Project each electrode onto its closest candidate mesh triangle
