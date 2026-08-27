@@ -19,7 +19,7 @@ os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
 
 def map_name():
-    map_id = 5
+    map_id = 6
 
     name_prefix = [
         '103_5-2-1-1-3-Rp-ReLA CS REF 230', # 0, flutter

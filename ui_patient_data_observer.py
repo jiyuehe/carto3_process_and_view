@@ -120,10 +120,10 @@ data_store = {
     'directory': directory,
     'name_prefix': name_prefix,
     'clinical_data': catheter,
-    'node_positions': mesh['geometry_original_vertex'],
     'mesh_vertex': mesh['geometry_original_vertex'],
     'mesh_face': mesh['geometry_original_face'],
-    'mesh_edge': mesh['geometry_original_edge'],
+    'refined_mesh_vertex': mesh['vertex'],
+    'refined_mesh_face': mesh['face'],
     'segment_count': segment_count,
     'segment_electrode_count': segment_electrode_count,
     'electrode_positions': electrode_positions,
@@ -294,10 +294,8 @@ def get_data():
     # Keep initial payload lightweight; electrograms are fetched on demand.
     data = {
         'name_prefix': data_store['name_prefix'],
-        'node_positions': data_store['node_positions'].tolist(),
         'mesh_vertex': data_store['mesh_vertex'].tolist(),
         'mesh_face': data_store['mesh_face'].tolist(),
-        'mesh_edge': data_store['mesh_edge'].tolist(),
         'electrode_positions': [np.asarray(seg, dtype=float).tolist() for seg in data_store['electrode_positions']],
         'electrode_positions_on_mesh': [
             np.asarray(seg, dtype=float).tolist()

@@ -409,13 +409,13 @@
                 y: [activePosns.map(p => p[1])],
                 z: [activePosns.map(p => p[2])],
                 'marker.color': [activeColors]
-            }, [2]);
+            }, [1]);
             Plotly.restyle(plot, {
                 x: [inactivePosns.map(p => p[0])],
                 y: [inactivePosns.map(p => p[1])],
                 z: [inactivePosns.map(p => p[2])],
                 'marker.color': [inactiveColors]
-            }, [3]);
+            }, [2]);
             // update other-segments electrodes (all electrodes except current segment)
             const currLen = electrodePositions.length;
             let startIndex = 0;
@@ -436,13 +436,13 @@
                 y: [otherActivePosns.map(p => p[1])],
                 z: [otherActivePosns.map(p => p[2])],
                 'marker.color': [otherActiveColors]
-            }, [4]);
+            }, [3]);
             Plotly.restyle(plot, {
                 x: [otherInactivePosns.map(p => p[0])],
                 y: [otherInactivePosns.map(p => p[1])],
                 z: [otherInactivePosns.map(p => p[2])],
                 'marker.color': [otherInactiveColors]
-            }, [5]);
+            }, [4]);
 
         }
 
@@ -457,7 +457,6 @@
 
             const meshVertices = appData.mesh_vertex || [];
             const meshFaces = appData.mesh_face || [];
-            const meshEdges = appData.mesh_edge || [];
             const atriumTrace = {
                 type: 'mesh3d',
                 x: meshVertices.map(p => p[0]),
@@ -478,28 +477,6 @@
                 opacity: 1,
                 visible: showMesh,
                 showscale: false,
-                showlegend: false,
-                hoverinfo: 'none',
-            };
-
-            const edgeX = [], edgeY = [], edgeZ = [];
-            meshEdges.forEach(([start, end]) => {
-                const startVertex = meshVertices[start];
-                const endVertex = meshVertices[end];
-                if (!startVertex || !endVertex) return;
-                edgeX.push(startVertex[0], endVertex[0], null);
-                edgeY.push(startVertex[1], endVertex[1], null);
-                edgeZ.push(startVertex[2], endVertex[2], null);
-            });
-            const meshEdgeTrace = {
-                type: 'scatter3d',
-                mode: 'lines',
-                x: edgeX,
-                y: edgeY,
-                z: edgeZ,
-                line: { color: 'rgb(100,100,100)', width: 1 },
-                opacity: 0.15,
-                visible: showMesh,
                 showlegend: false,
                 hoverinfo: 'none',
             };
@@ -603,7 +580,6 @@
 
             Plotly.newPlot('mesh_and_electrode', [
                 atriumTrace,
-                meshEdgeTrace,
                 electrodeActiveTrace,
                 electrodeInactiveTrace,
                 otherSegmentsActiveTrace,
@@ -1156,7 +1132,7 @@
         document.getElementById('toggleInterpolateMesh').addEventListener('change', (e) => {
             const plot = document.getElementById('mesh_and_electrode');
             const showMesh = e.target.checked;
-            Plotly.restyle(plot, { visible: showMesh }, [0, 1]);
+            Plotly.restyle(plot, { visible: showMesh }, [0]);
             if (showMesh) {
                 refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
             }
