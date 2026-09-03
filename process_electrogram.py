@@ -373,11 +373,18 @@ for n in range(n_segment):
             )
 
             if good_signal_flag == 1:
+                # clip the electrogram to within +/- mean(peak_values)
+                mean_peak_value = np.mean(peak_values)
+                electrogram = np.clip(electrogram, -mean_peak_value, mean_peak_value)
+
                 # find out the cycle length via autocorrelation
                 autocorrelation = np.correlate(electrogram, electrogram, mode='full')[n_samples - 1:]
                 autocorrelation /= autocorrelation[0]
                 autocorrelations[channel_idx] = autocorrelation
-                candidate_lags, properties = find_peaks(autocorrelation,prominence=0.05)
+
+                # blank out the first portion of the autocorrelation to avoid detecting the zero-lag peak and nearby peaks
+                autocorrelation[:150] = 0
+                candidate_lags, properties = find_peaks(autocorrelation,distance=150)
 
                 debug_plot = 0
                 if debug_plot: # plot the autocorrelation for this channel
@@ -405,8 +412,9 @@ for n in range(n_segment):
                 if len(candidate_lags) > 0:
                     candidate_lags = candidate_lags[candidate_lags != 1]
                     if len(candidate_lags) > 0:
-                        highest_peak_idx = np.argmax(autocorrelation[candidate_lags])
-                        cycle_length_unipolar[channel_idx] = candidate_lags[highest_peak_idx]
+                        # idx = np.argmax(autocorrelation[candidate_lags]) # choose the peak with the highest autocorrelation value as the cycle length
+                        idx = 0 # choose the first peak as the cycle length
+                        cycle_length_unipolar[channel_idx] = candidate_lags[idx]
 
     # the cycle length of this recording segment is the median of the cycle lengths of all unipolar electrograms
     cycle_lengths_per_segment[n] = cycle_length_unipolar
