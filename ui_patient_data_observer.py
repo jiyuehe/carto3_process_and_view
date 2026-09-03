@@ -145,7 +145,7 @@ def load_mesh_data(name_prefix):
         dtype=object,
     )
 
-    median_cycle_length = catheter['cycle_length']
+    median_cycle_length = int(catheter['cycle_length'])
 
     electrode_positions_all = (
         np.vstack([
