@@ -359,7 +359,7 @@ for n in range(n_segment):
     for channel_idx in range(n_channels):
         electrogram = qrs_subtracted[:, channel_idx].astype(float)
 
-        if np.ptp(electrogram) >= 3: # mV
+        if np.ptp(electrogram) >= 0.5: # mV
             electrogram = electrogram - np.mean(electrogram)
 
             # find peaks on the electrogram
@@ -695,7 +695,7 @@ all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cy
 all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
 median_cycle_length = np.median(all_cycle_lengths)
 
-catheter['surface_ecg_sum'] = surface_signal_smooth
+catheter['surface_ecg_sum'] = surface_ecg_sum
 catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 catheter['cycle_lengths_per_segment'] = cycle_lengths_per_segment
