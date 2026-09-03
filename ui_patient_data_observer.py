@@ -38,47 +38,6 @@ SMOOTHING_EFFECTIVE_RADIUS = 3.0 * SMOOTHING_SPATIAL_SIGMA
 SMOOTHING_HUBER_FACTOR = 1.5
 SMOOTHING_DIFFUSION_STEP = 0.5
 
-
-def estimate_electrogram_cycle_lengths(electrogram_segments):
-    """Estimate one cycle length per electrogram from normalized autocorrelation."""
-    cycle_lengths = []
-
-    for segment in electrogram_segments:
-        electrograms = np.asarray(segment, dtype=np.float64)
-        if electrograms.ndim != 2 or electrograms.shape[0] < 3:
-            continue
-
-        n_samples, _ = electrograms.shape
-        finite_channels = np.all(np.isfinite(electrograms), axis=0)
-        active_channels = finite_channels & (np.ptp(electrograms, axis=0) >= 0.3)
-        if not np.any(active_channels):
-            continue
-
-        signals = electrograms[:, active_channels]
-        signals = signals - np.mean(signals, axis=0, keepdims=True)
-
-        # FFT equivalent of the one-sided np.correlate calculation already
-        # used in process_electrogram.py, evaluated for all channels together.
-        fft_length = 1 << (2 * n_samples - 2).bit_length()
-        spectra = np.fft.rfft(signals, n=fft_length, axis=0)
-        autocorrelations = np.fft.irfft(
-            spectra * np.conjugate(spectra), n=fft_length, axis=0
-        )[:n_samples]
-
-        zero_lag = autocorrelations[0]
-        usable = np.isfinite(zero_lag) & (zero_lag > 0)
-        autocorrelations[:, usable] /= zero_lag[usable]
-
-        for channel_index in np.flatnonzero(usable):
-            autocorrelation = autocorrelations[:, channel_index]
-            candidate_lags, _ = find_peaks(autocorrelation, prominence=0.05)
-            candidate_lags = candidate_lags[candidate_lags != 1]
-            if candidate_lags.size:
-                strongest = candidate_lags[np.argmax(autocorrelation[candidate_lags])]
-                cycle_lengths.append(float(strongest))
-
-    return np.asarray(cycle_lengths, dtype=np.float64)
-
 #%%
 # setting
 directory = configuration.directory_setup()
@@ -186,18 +145,7 @@ def load_mesh_data(name_prefix):
         dtype=object,
     )
 
-    electrogram_cycle_lengths = estimate_electrogram_cycle_lengths(
-        egm_uni_qrs_subtracted
-    )
-    median_cycle_length = (
-        float(np.median(electrogram_cycle_lengths))
-        if electrogram_cycle_lengths.size else np.nan
-    )
-    print(
-        f'{name_prefix}: estimated median cycle length '
-        f'{median_cycle_length:g} samples from '
-        f'{electrogram_cycle_lengths.size} electrograms'
-    )
+    median_cycle_length = catheter['cycle_length']
 
     electrode_positions_all = (
         np.vstack([
@@ -243,7 +191,6 @@ def load_mesh_data(name_prefix):
         'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
         'egm_ref': egm_ref,
         'activation_uni': activation_uni,
-        'electrogram_cycle_lengths': electrogram_cycle_lengths,
         'median_cycle_length': median_cycle_length,
         'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
         'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
@@ -589,7 +536,6 @@ def ui_data_payload():
             float(data_store['median_cycle_length'])
             if np.isfinite(data_store['median_cycle_length']) else None
         ),
-        'cycle_length_electrogram_count': int(len(data_store['electrogram_cycle_lengths'])),
         'clinical_electrogram_woi_start': int(data_store['clinical_electrogram_woi_start']),
         'clinical_electrogram_woi_end': int(data_store['clinical_electrogram_woi_end']),
         'activation_uni': [

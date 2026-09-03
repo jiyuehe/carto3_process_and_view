@@ -111,6 +111,7 @@ n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording 
 mapping_electrogram_unipolar_activation = [None for _ in range(n_segment)]
 mapping_electrogram_unipolar_qrs_subtracted = [None for _ in range(n_segment)]
 surface_ecg_sum = [None for _ in range(n_segment)]
+cycle_lengths_per_segment = [None for _ in range(n_segment)]
 for n in range(n_segment):
     print(f'recording segment id {n} in [0, {n_segment-1}]')
 
@@ -358,22 +359,58 @@ for n in range(n_segment):
     for channel_idx in range(n_channels):
         electrogram = qrs_subtracted[:, channel_idx].astype(float)
 
-        if np.ptp(electrogram) >= 0.3: # mV
+        if np.ptp(electrogram) >= 3: # mV
             electrogram = electrogram - np.mean(electrogram)
-            autocorrelation = np.correlate(electrogram, electrogram, mode='full')[n_samples - 1:]
-            autocorrelation /= autocorrelation[0]
-            autocorrelations[channel_idx] = autocorrelation
-            candidate_lags, properties = find_peaks(autocorrelation,prominence=0.05)
 
-            if len(candidate_lags) > 0:
-                candidate_lags = candidate_lags[candidate_lags != 1]
+            # find peaks on the electrogram
+            peak_indices, peak_properties = find_peaks(electrogram, distance=200, height=0.08*np.ptp(electrogram))
+
+            peak_values = peak_properties['peak_heights']
+            good_signal_flag = int(
+                peak_values.size > 0
+                and np.min(peak_values) >= 0.8 * np.max(peak_values)
+            )
+
+            if good_signal_flag == 1:
+                # find out the cycle length via autocorrelation
+                autocorrelation = np.correlate(electrogram, electrogram, mode='full')[n_samples - 1:]
+                autocorrelation /= autocorrelation[0]
+                autocorrelations[channel_idx] = autocorrelation
+                candidate_lags, properties = find_peaks(autocorrelation,prominence=0.05)
+
+                debug_plot = 0
+                if debug_plot: # plot the autocorrelation for this channel
+                    time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
+                    fig, (electrogram_axis, autocorrelation_axis) = plt.subplots(2,1,figsize=(8, 8))
+                    electrogram_axis.plot(time_ms, electrogram, color='blue', linewidth=1.0)
+                    electrogram_axis.set_title('QRS-subtracted unipolar electrogram')
+                    electrogram_axis.set_xlabel('Time (ms)')
+                    electrogram_axis.set_ylabel('Voltage (mV)')
+
+                    autocorrelation_axis.plot(time_ms, autocorrelation, color='blue', linewidth=1.0)
+                    autocorrelation_axis.scatter(
+                        time_ms[candidate_lags],
+                        autocorrelation[candidate_lags],
+                        color='red',
+                        s=20,
+                        zorder=5,
+                    )
+                    autocorrelation_axis.set_title('Autocorrelation')
+                    autocorrelation_axis.set_xlabel('Lag (ms)')
+                    autocorrelation_axis.set_ylabel('Autocorrelation')
+                    fig.suptitle(f'Segment id {n} of [0, {n_segment-1}], channel {channel_idx}')
+                    fig.tight_layout()
+
                 if len(candidate_lags) > 0:
-                    highest_peak_idx = np.argmax(autocorrelation[candidate_lags])
-                    cycle_length_unipolar[channel_idx] = candidate_lags[highest_peak_idx]
+                    candidate_lags = candidate_lags[candidate_lags != 1]
+                    if len(candidate_lags) > 0:
+                        highest_peak_idx = np.argmax(autocorrelation[candidate_lags])
+                        cycle_length_unipolar[channel_idx] = candidate_lags[highest_peak_idx]
 
     # the cycle length of this recording segment is the median of the cycle lengths of all unipolar electrograms
-    finite_cycle_lengths = cycle_length_unipolar[np.isfinite(cycle_length_unipolar)]
-    cycle_lengths = np.median(finite_cycle_lengths) if len(finite_cycle_lengths) > 0 else np.nan
+    cycle_lengths_per_segment[n] = cycle_length_unipolar
+    cl = cycle_length_unipolar[np.isfinite(cycle_length_unipolar)] # remove NaN values
+    cycle_length_this_segment = np.median(cl) if len(cl) > 0 else np.nan
 
     debug_plot = 0
     if debug_plot: # plot the QRS-subtracted unipolar electrograms and their autocorrelations
@@ -401,10 +438,10 @@ for n in range(n_segment):
         )
         for channel_idx in range(n_channels):
             if np.isfinite(cycle_length_unipolar[channel_idx]):
-                cycle_length = int(cycle_length_unipolar[channel_idx])
+                cl = int(cycle_length_unipolar[channel_idx])
                 axes[1].scatter(
-                    time_ms[cycle_length],
-                    autocorrelations[channel_idx][cycle_length] * autocorrelation_scale
+                    time_ms[cl],
+                    autocorrelations[channel_idx][cl] * autocorrelation_scale
                     + trace_offsets[channel_idx],
                     color='red',
                     s=16,
@@ -427,9 +464,9 @@ for n in range(n_segment):
         plt.close(fig)
 
     # for each qrs subtracted unipolar electrogram, find out the activation time by finding the peak of the maximum negative slope (dv/dt)
-    if not np.isnan(cycle_lengths):
-        minimum_activation_distance = int(np.floor(0.8 * cycle_lengths))
-    elif np.isnan(cycle_lengths):
+    if not np.isnan(cycle_length_this_segment):
+        minimum_activation_distance = int(np.floor(0.8 * cycle_length_this_segment))
+    elif np.isnan(cycle_length_this_segment):
         minimum_activation_distance = 50
 
     activation_times_unipolar = []
@@ -653,9 +690,16 @@ for n in range(n_segment):
         plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
         plt.close()
 
+# find out the cycle length of all the unipolar electrograms across all recording segments
+all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
+all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
+median_cycle_length = np.median(all_cycle_lengths)
+
 catheter['surface_ecg_sum'] = surface_signal_smooth
 catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
+catheter['cycle_lengths_per_segment'] = cycle_lengths_per_segment
+catheter['cycle_length'] = median_cycle_length
 
 #%%
 # grab activations within window of interest
