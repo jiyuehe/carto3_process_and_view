@@ -365,10 +365,11 @@ for n in range(n_segment):
             # find peaks on the electrogram
             peak_indices, peak_properties = find_peaks(electrogram, distance=200, height=0.08*np.ptp(electrogram))
 
+            # check if the electrogram has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
             peak_values = peak_properties['peak_heights']
             good_signal_flag = int(
                 peak_values.size > 0
-                and np.min(peak_values) >= 0.8 * np.max(peak_values)
+                and np.min(peak_values) >= 0.5 * np.max(peak_values)
             )
 
             if good_signal_flag == 1:
@@ -700,6 +701,8 @@ catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_un
 catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
 catheter['cycle_lengths_per_segment'] = cycle_lengths_per_segment
 catheter['cycle_length'] = median_cycle_length
+
+print(f'median cycle length across all segments: {median_cycle_length} ms')
 
 #%%
 # grab activations within window of interest
