@@ -18,6 +18,20 @@ script_dir = os.path.dirname(os.path.abspath(__file__)) # get the path of the cu
 os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
 
+def directory_setup():
+    # directory folder
+    directory = {}
+    directory['home'] = script_dir
+    # directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data_npz') # Jay's computer
+    directory['data'] = Path('/Users/j/Library/CloudStorage/Box-Box/Jiyue He/ArrhythmiaNet_Project/carto3_files/data_npz') # Jay's Macbook
+    # directory['data'] = Path('/mnt/data2/ruhi/data npz/') # Ruhi
+    # directory['data'] = Path('') # Justin
+    directory['result'] = script_dir / 'result'
+
+    (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
+
+    return directory
+
 def map_name():
     map_id = 8
 
@@ -34,17 +48,3 @@ def map_name():
     ]
 
     return name_prefix[map_id]
-
-def directory_setup():
-    # directory folder
-    directory = {}
-    directory['home'] = script_dir
-    # directory['data'] = Path('/home/j/Desktop/hdd/share_folder/carto3_files/data_npz') # Jay's computer
-    directory['data'] = Path('/Users/j/Documents/ArrhythmiaNet_Project/carto3_files/data_npz') # Jay's Macbook
-    # directory['data'] = Path('/mnt/data2/ruhi/data npz/') # Ruhi
-    # directory['data'] = Path('') # Justin
-    directory['result'] = script_dir / 'result'
-
-    (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
-
-    return directory
