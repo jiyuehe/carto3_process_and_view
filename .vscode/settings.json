@@ -1,5 +1,7 @@
 {
-    "python.defaultInterpreterPath": "/home/j/Desktop/ssd/myenv/bin/python3", // Jay's computer
+    // "python.defaultInterpreterPath": "/home/j/Desktop/ssd/myenv/bin/python3", // Jay's desktop
+    "python.defaultInterpreterPath": "/Users/j/Documents/py_venv/bin/python3", // Jay's Macbook
     // "python.defaultInterpreterPath": "/home/ruhi/Desktop/python virtual environment/bin/python3", // Ruhi
+    // "python.defaultInterpreterPath": "", // Justin
     "python.terminal.activateEnvironment": true,
 }
