@@ -45,13 +45,12 @@ save_lock = threading.RLock()
 
 
 def available_mesh_names():
-    """Return catheter data sets that also have the mesh data required by the UI."""
     suffix = '_catheter.npz'
     names = []
     for catheter_path in directory['data'].glob(f'*{suffix}'):
-        name = catheter_path.name[:-len(suffix)]
-        if (directory['data'] / f'{name}_mesh.npz').is_file():
-            names.append(name)
+        if (directory['data'] / catheter_path).is_file():
+            names.append(catheter_path.name[:-len(suffix)])
+    
     return sorted(names, key=str.casefold)
 
 
@@ -196,15 +195,9 @@ def load_mesh_data(name_prefix):
         'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
     }
 
-
+#%%
 mesh_names = available_mesh_names()
-if not mesh_names:
-    raise FileNotFoundError(
-        f'No matching *_catheter.npz and *_mesh.npz files found in {directory["data"]}'
-    )
-initial_mesh_name = configuration.map_name()
-if initial_mesh_name not in mesh_names:
-    initial_mesh_name = mesh_names[0]
+initial_mesh_name = mesh_names[0]
 data_store = load_mesh_data(initial_mesh_name)
 
 
@@ -777,7 +770,7 @@ def save_activation_times():
 
 #%%
 if __name__ == '__main__':
-    server_port = 5001
+    server_port = 5010
 
     # stop any stale server that is already listening on Flask's port.
     stopped_port = subprocess.run(
