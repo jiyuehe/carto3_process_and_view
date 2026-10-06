@@ -22,10 +22,19 @@ def directory_setup():
     # directory folder
     directory = {}
     directory['home'] = script_dir
-    directory['data'] = Path('/home/j/Documents/box/carto3_files/data_npz') # Jay's computer
-    # directory['data'] = Path('/Users/j/Library/CloudStorage/Box-Box/Jiyue He/ArrhythmiaNet_Project/carto3_files/data_npz') # Jay's Macbook
-    # directory['data'] = Path('/mnt/data2/ruhi/data npz/') # Ruhi
-    # directory['data'] = Path('') # Justin
+
+    # Jay's desktop
+    directory['data'] = Path('/home/j/Documents/box/carto3_files/data_npz')
+
+    # Jay's Macbook
+    # directory['data'] = Path('/Users/j/Library/CloudStorage/Box-Box/Jiyue He/ArrhythmiaNet_Project/carto3_files/data_npz')
+
+    # Ruhi's 
+    # directory['data'] = Path('/Users/ruhisamudra/Library/CloudStorage/Box-Box/ArrhythmiaNet_Project/carto3_files/data_npz')
+
+    # Justin's
+    # directory['data'] = Path('')
+
     directory['result'] = script_dir / 'result'
 
     (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
