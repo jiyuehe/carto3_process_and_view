@@ -195,12 +195,6 @@ def load_mesh_data(name_prefix):
         'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
     }
 
-#%%
-mesh_names = available_mesh_names()
-initial_mesh_name = mesh_names[0]
-data_store = load_mesh_data(initial_mesh_name)
-
-
 def validate_activation_updates(payload):
     """Validate a batch of edited segments without changing server state."""
     updates = payload.get('segments')
@@ -767,6 +761,11 @@ def save_activation_times():
         'saved_segment_ids': saved_segment_ids,
         'saved_segment_count': len(saved_segment_ids),
     })
+
+#%%
+mesh_names = available_mesh_names()
+initial_mesh_name = mesh_names[0]
+data_store = load_mesh_data(initial_mesh_name)
 
 #%%
 if __name__ == '__main__':

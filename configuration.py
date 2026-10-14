@@ -26,14 +26,11 @@ def directory_setup():
     # Jay's desktop
     directory['data'] = Path('/home/j/Documents/box/carto3_files/data_npz')
 
-    # Jay's Macbook
-    # directory['data'] = Path('/Users/j/Library/CloudStorage/Box-Box/Jiyue He/ArrhythmiaNet_Project/carto3_files/data_npz')
-
     # Ruhi's 
     # directory['data'] = Path('/Users/ruhisamudra/Library/CloudStorage/Box-Box/ArrhythmiaNet_Project/carto3_files/data_npz')
 
     # Justin's
-    # directory['data'] = Path('')
+    # directory['data'] = Path('/Users/justinshirazian/Library/CloudStorage/Box-Box/ArrhythmiaNet_Project/carto3_files/data_npz')
 
     directory['result'] = script_dir / 'result'
 

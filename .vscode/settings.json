@@ -2,9 +2,6 @@
     // Jay's desktop
     "python.defaultInterpreterPath": "/home/j/Desktop/ssd/myenv/bin/python3",
 
-    // Jay's Macbook
-    // "python.defaultInterpreterPath": "/Users/j/Documents/py_venv/bin/python3",
-
     // Justin's Macbook
     // "python.defaultInterpreterPath": "/Users/justinshirazian/Downloads/ArrhythmiaNet_Project_local/venv/bin/python3",
 
