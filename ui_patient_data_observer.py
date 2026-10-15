@@ -30,7 +30,6 @@ import time
 import configuration
 import utility
 
-
 # Do not color mesh vertices farther than this geodesic (surface) distance from
 # an electrode with a valid activation, in mesh coordinate units.
 INTERPOLATION_MAX_SURFACE_DISTANCE = 10.0
