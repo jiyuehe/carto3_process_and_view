@@ -38,3 +38,7 @@ def directory_setup():
     (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
 
     return directory
+
+def map_name():
+    name = '0_1-la1 78 240'
+    return name
