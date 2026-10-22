@@ -32,6 +32,13 @@ pio.renderers.default = 'browser'
 # setting
 # ==============================
 name_prefix = '0_1-la1 78 240'
+# name_prefix = '1_1-x'
+# name_prefix = '2_2-lafam pr'
+# name_prefix = '3_1-la1'
+# name_prefix = '4_2-LA FAM'
+# name_prefix = '5_2-la mem'
+# name_prefix = '6_2-LA MEM'
+# name_prefix = '7_2-LA FAM'
 # ==============================
 
 directory = configuration.directory_setup()
@@ -43,7 +50,6 @@ carto = {k: data[k] for k in data.files}
 # recording segments data
 catheter = carto['catheter'].item()
 mapping_name_unipolar = catheter['mapping_name_unipolar']
-mapping_name_unipolar = [name.replace("MCC_Dx_UniPolar_", "") for name in mapping_name_unipolar]
 surface_name = catheter['surface_name']
 
 # some segments may have missing electrode positions, remove those segments from the analysis
