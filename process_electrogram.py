@@ -31,10 +31,10 @@ pio.renderers.default = 'browser'
 #%%
 # setting
 # ==============================
-name_prefix = '0_1-la1 78 240'
+# name_prefix = '0_1-la1 78 240'
 # name_prefix = '1_1-x'
 # name_prefix = '2_2-lafam pr'
-# name_prefix = '3_1-la1'
+name_prefix = '3_1-la1'
 # name_prefix = '4_2-LA FAM'
 # name_prefix = '5_2-la mem'
 # name_prefix = '6_2-LA MEM'
@@ -799,9 +799,23 @@ catheter['geometry_original_vertex'] = original_vertex
 catheter['geometry_original_face'] = original_face
 catheter['vertex'] = refined_vertex
 catheter['face'] = refined_face
+# electrode_positions_array = np.empty(len(electrode_positions), dtype=object)
+# electrode_positions_array[:] = electrode_positions
 catheter['electrode_positions'] = electrode_positions
 catheter['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
 catheter['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
+
+# Preserve per-segment arrays when channel counts differ between segments.
+for field_name, field_values in catheter.items():
+    if not isinstance(field_values, (list, tuple)):
+        continue
+    try:
+        np.asarray(field_values)
+    except ValueError:
+        object_array = np.empty(len(field_values), dtype=object)
+        object_array[:] = field_values
+        catheter[field_name] = object_array
+
 file_path = directory['data'] / f'{name_prefix}_catheter.npz'
 np.savez(file_path, **catheter)
 
