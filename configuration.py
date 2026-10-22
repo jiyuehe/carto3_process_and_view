@@ -18,7 +18,8 @@ from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__)) # get the path of the current script
 script_dir = Path(script_dir)
 
-COMMON_DIR = Path('/home/j/Documents/box/codes/common')
+# COMMON_DIR = Path('/home/j/Documents/box/codes/common')
+COMMON_DIR = Path('..')
 
 def directory_setup():
     # directory folder
