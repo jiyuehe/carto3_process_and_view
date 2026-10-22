@@ -29,19 +29,20 @@ import plotly.io as pio
 pio.renderers.default = 'browser'
 
 #%%
+directory = configuration.directory_setup()
+
+# grab all the available patient data file names
+suffix = '_catheter.npz'
+names = []
+for catheter_path in directory['data'].glob(f'*{suffix}'):
+    if (directory['data'] / catheter_path).is_file():
+        names.append(catheter_path.name[:-len(suffix)])
+name_prefixes = sorted(names, key=str.casefold)
+
 # setting
 # ==============================
-# name_prefix = '0_1-la1 78 240'
-# name_prefix = '1_1-x'
-# name_prefix = '2_2-lafam pr'
-name_prefix = '3_1-la1'
-# name_prefix = '4_2-LA FAM'
-# name_prefix = '5_2-la mem'
-# name_prefix = '6_2-LA MEM'
-# name_prefix = '7_2-LA FAM'
+name_prefix = name_prefixes[7]
 # ==============================
-
-directory = configuration.directory_setup()
 
 # load electrogram recording data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
