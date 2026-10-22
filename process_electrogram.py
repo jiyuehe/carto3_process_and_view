@@ -799,13 +799,11 @@ catheter['geometry_original_vertex'] = original_vertex
 catheter['geometry_original_face'] = original_face
 catheter['vertex'] = refined_vertex
 catheter['face'] = refined_face
-# electrode_positions_array = np.empty(len(electrode_positions), dtype=object)
-# electrode_positions_array[:] = electrode_positions
 catheter['electrode_positions'] = electrode_positions
 catheter['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
 catheter['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
 
-# Preserve per-segment arrays when channel counts differ between segments.
+# savez will have error if channel counts differ between segments, need to convert to object type
 for field_name, field_values in catheter.items():
     if not isinstance(field_values, (list, tuple)):
         continue
