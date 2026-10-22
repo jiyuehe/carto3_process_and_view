@@ -16,8 +16,9 @@
 import os
 from pathlib import Path
 script_dir = os.path.dirname(os.path.abspath(__file__)) # get the path of the current script
-os.chdir(script_dir) # change the working directory
 script_dir = Path(script_dir)
+
+COMMON_DIR = Path('/home/j/Documents/box/codes/common')
 
 def directory_setup():
     # directory folder
@@ -38,7 +39,3 @@ def directory_setup():
     (directory['result']).mkdir(parents=True, exist_ok=True) # create the folder if it does not exist
 
     return directory
-
-def map_name():
-    name = '0_1-la1 78 240'
-    return name

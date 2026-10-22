@@ -18,7 +18,11 @@ import numpy as np
 from scipy.signal import butter, find_peaks, sosfiltfilt
 import matplotlib.pyplot as plt
 import utility
+
 import configuration
+import sys
+sys.path.insert(0, str(configuration.COMMON_DIR))
+import common
 
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -26,8 +30,11 @@ pio.renderers.default = 'browser'
 
 #%%
 # setting
+# ==============================
+name_prefix = '0_1-la1 78 240'
+# ==============================
+
 directory = configuration.directory_setup()
-name_prefix = configuration.map_name()
 
 # load electrogram recording data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
