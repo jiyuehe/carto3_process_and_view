@@ -70,7 +70,7 @@ for field_name, field_values in catheter.items():
         ]
 
 debug_plot = 0
-if debug_plot: # plot the recordings of each segment
+if debug_plot: # plot the recordings
     recording_groups = (
         ('Mapping unipolar electrograms', catheter['mapping_electrogram_unipolar'], mapping_name_unipolar, 'blue'),
         ('Surface electrograms', catheter['surface_electrogram'], surface_name, 'blue'),
