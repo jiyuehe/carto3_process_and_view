@@ -123,11 +123,10 @@ def prepare_surface_distance_data(vertices, faces, sample_points):
 
 
 def load_mesh_data(name_prefix):
-    """Load and prepare every value used by the UI for one mesh/data set."""
-    mesh = load_npz_values(directory['data'] / f'{name_prefix}_mesh.npz')
+    """Load and prepare every value used by the UI for one data set."""
     catheter = load_npz_values(directory['data'] / f'{name_prefix}_catheter.npz')
 
-    electrode_positions = np.asarray(mesh['electrode_positions'], dtype=object)
+    electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
     segment_count = len(electrode_positions)
     segment_electrode_count = (
         int(electrode_positions[0].shape[0]) if segment_count else 0
@@ -154,19 +153,19 @@ def load_mesh_data(name_prefix):
         if segment_count else np.empty((0, 3), dtype=float)
     )
     electrode_positions_on_original_mesh_all = np.asarray(
-        mesh['electrode_positions_on_original_mesh_all'], dtype=np.float64
+        catheter['electrode_positions_on_original_mesh_all'], dtype=np.float64
     )
     electrode_positions_on_refined_mesh_all = np.asarray(
-        mesh['electrode_positions_on_refined_mesh_all'], dtype=np.float64
+        catheter['electrode_positions_on_refined_mesh_all'], dtype=np.float64
     )
     original_surface_data = prepare_surface_distance_data(
-        mesh['geometry_original_vertex'],
-        mesh['geometry_original_face'],
+        catheter['geometry_original_vertex'],
+        catheter['geometry_original_face'],
         electrode_positions_on_original_mesh_all,
     )
     refined_surface_data = prepare_surface_distance_data(
-        mesh['vertex'],
-        mesh['face'],
+        catheter['vertex'],
+        catheter['face'],
         electrode_positions_on_refined_mesh_all,
     )
 
@@ -174,10 +173,10 @@ def load_mesh_data(name_prefix):
         'directory': directory,
         'name_prefix': name_prefix,
         'clinical_data': catheter,
-        'mesh_vertex': mesh['geometry_original_vertex'],
-        'mesh_face': mesh['geometry_original_face'],
-        'refined_mesh_vertex': mesh['vertex'],
-        'refined_mesh_face': mesh['face'],
+        'mesh_vertex': catheter['geometry_original_vertex'],
+        'mesh_face': catheter['geometry_original_face'],
+        'refined_mesh_vertex': catheter['vertex'],
+        'refined_mesh_face': catheter['face'],
         'segment_count': segment_count,
         'segment_electrode_count': segment_electrode_count,
         'electrode_positions': electrode_positions,

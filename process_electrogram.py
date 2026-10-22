@@ -742,9 +742,6 @@ for field_name in (
     object_array[:] = values
     catheter[field_name] = object_array
 
-file_path = directory['data'] / f'{name_prefix}_catheter.npz'
-np.savez(file_path, **catheter)
-
 #%%
 # project electrode positions onto the mesh surface
 data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
@@ -792,11 +789,15 @@ print(
     f'{projection_max_distance:g}-unit maximum projection distance'
 )
 
-mesh['electrode_positions'] = electrode_positions
-mesh['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
-mesh['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
-file_path = directory['data'] / f'{name_prefix}_mesh.npz'
-np.savez(file_path, **mesh, allow_pickle=True)
+catheter['geometry_original_vertex'] = original_vertex
+catheter['geometry_original_face'] = original_face
+catheter['vertex'] = refined_vertex
+catheter['face'] = refined_face
+catheter['electrode_positions'] = electrode_positions
+catheter['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
+catheter['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
+file_path = directory['data'] / f'{name_prefix}_catheter.npz'
+np.savez(file_path, **catheter)
 
 debug_plot = 0
 if debug_plot == 1: # plot the electrode positions on the mesh surface
