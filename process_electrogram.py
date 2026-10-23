@@ -32,7 +32,7 @@ pio.renderers.default = 'browser'
 directory = configuration.directory_setup()
 
 # grab all the available patient data file names
-suffix = '_catheter.npz'
+suffix = '_carto.npz'
 names = []
 for catheter_path in directory['data'].glob(f'*{suffix}'):
     if (directory['data'] / catheter_path).is_file():
@@ -41,9 +41,10 @@ name_prefixes = sorted(names, key=str.casefold)
 
 # setting
 # ==============================
-name_prefix = name_prefixes[0]
+name_prefix = name_prefixes[8]
 # ==============================
 
+#%%
 # load electrogram recording data
 data = np.load(directory['data'] / f'{name_prefix}_carto.npz', allow_pickle=True)
 carto = {k: data[k] for k in data.files}
