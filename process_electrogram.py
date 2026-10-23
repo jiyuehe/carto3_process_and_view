@@ -41,7 +41,7 @@ name_prefixes = sorted(names, key=str.casefold)
 
 # setting
 # ==============================
-name_prefix = name_prefixes[7]
+name_prefix = name_prefixes[0]
 # ==============================
 
 # load electrogram recording data
@@ -766,8 +766,8 @@ for n in range(len(catheter['mapping_position_unipolar'])):
 
 print('project electrodes to original and refined meshes')
 electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
-projection_normal_vicinity = 1.0 # mesh coordinate units; electrodes farther from every nearby vertex-normal line are rejected
-projection_max_distance = 10.0 # mesh coordinate units along the bidirectional vertex-normal line
+projection_normal_vicinity = 10.0 # mesh coordinate units; electrodes farther from every nearby vertex-normal line are rejected
+projection_max_distance = 20.0 # mesh coordinate units along the bidirectional vertex-normal line
 electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(
     original_vertex,
     original_face,

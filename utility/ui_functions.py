@@ -109,9 +109,9 @@ def project_electrodes_to_mesh(
     vertices,
     faces,
     electrodes,
-    normal_vicinity=1.0,
-    projection_max_distance=10.0,
-    normal_candidate_count=16,
+    normal_vicinity,
+    projection_max_distance,
+    normal_candidate_count=20,
 ):
     """Project electrodes near a vertex-normal line; reject the rest with NaNs.
 
