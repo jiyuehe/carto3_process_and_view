@@ -9,5 +9,5 @@
     // "python.defaultInterpreterPath": "/Users/ruhisamudra/Downloads/venv/bin/python3",
     
     "python.terminal.activateEnvironment": true,
-    "python.analysis.extraPaths": ["/home/j/Documents/box/codes/common"], // add the parent folder in the file system, so it will recognize the common/common.py file
+    "python.analysis.extraPaths": [".."], // add the parent folder in the file system, so it will recognize the common/common.py file
 }
