@@ -200,6 +200,7 @@ def grab_activations_within_window_of_interest(catheter,t_start,t_end):
     _, n_channels = catheter['mapping_electrogram_unipolar_qrs_subtracted'][0].shape
 
     mapping_electrogram_unipolar_activation_within_woi = [None for _ in range(n_segment)]
+    mapping_electrogram_unipolar_activation_all = [None for _ in range(n_segment)]
     activation_time_edge_buffer = 10 # remove activation near the two ends of the window of interest
     for n in range(n_segment):
         activation_times_unipolar_refined = mapping_electrogram_unipolar_activation[n]
@@ -207,15 +208,24 @@ def grab_activations_within_window_of_interest(catheter,t_start,t_end):
             activation_times_unipolar_refined = [np.array([], dtype=int) for _ in range(n_channels)]
 
         activation_times_within_woi = np.zeros((len(activation_times_unipolar_refined),), dtype=object)
+        all_activation_times = np.empty(
+            len(activation_times_unipolar_refined), dtype=object
+        )
         for channel_idx in range(len(activation_times_unipolar_refined)):
             activation_times = activation_times_unipolar_refined[channel_idx]
+            all_activation_times[channel_idx] = (
+                np.asarray(activation_times, dtype=int)
+                if activation_times is not None else np.array([], dtype=int)
+            )
             if activation_times is not None and np.ptp(catheter['mapping_electrogram_unipolar_qrs_subtracted'][n][t_start:t_end,channel_idx]) >= 0.1:
                 temp = activation_times[(activation_times >= t_start+activation_time_edge_buffer) & (activation_times <= t_end-activation_time_edge_buffer)]
                 if len(temp) != 0:
                     activation_times_within_woi[channel_idx] = temp[0]
 
         mapping_electrogram_unipolar_activation_within_woi[n] = activation_times_within_woi
+        mapping_electrogram_unipolar_activation_all[n] = all_activation_times
 
     catheter['mapping_electrogram_unipolar_activation_within_woi'] = mapping_electrogram_unipolar_activation_within_woi
+    catheter['mapping_electrogram_unipolar_activation_all'] = mapping_electrogram_unipolar_activation_all
 
     return catheter

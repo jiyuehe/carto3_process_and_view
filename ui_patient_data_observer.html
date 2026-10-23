@@ -837,6 +837,7 @@
             const originalTraces = [];
             const qrsSubtractedTraces = [];
             const activationTraces = [];
+            const otherActivationTraces = [];
             const yTickVals = [];
             const yTickText = [];
             let minY = Infinity;
@@ -915,6 +916,33 @@
                     });
                 }
 
+                const allActivationTimes = appData.activation_uni_all?.[currentSegmentIndex]?.[eId] || [];
+                const otherActivationTimes = Array.isArray(egmUniQrsSubtracted)
+                    ? allActivationTimes.filter(
+                        actTime => actTime !== activationUni[eId]
+                            && Number.isInteger(actTime)
+                            && actTime >= 0
+                            && actTime < egmUniQrsSubtracted.length
+                    )
+                    : [];
+                if (otherActivationTimes.length > 0) {
+                    otherActivationTraces.push({
+                        type: 'scatter',
+                        mode: 'markers',
+                        x: otherActivationTimes,
+                        y: otherActivationTimes.map(
+                            actTime => egmUniQrsSubtracted[actTime] + i * shiftSpacing
+                        ),
+                        marker: {
+                            symbol: 'circle',
+                            size: 8,
+                            color: 'black',
+                            opacity: 0.7
+                        },
+                        showlegend: false,
+                    });
+                }
+
                 for (const signal of visibleSignals) {
                     minY = Math.min(minY, ...signal);
                     maxY = Math.max(maxY, ...signal);
@@ -927,6 +955,7 @@
                 ...referenceTraces,
                 ...originalTraces,
                 ...qrsSubtractedTraces,
+                ...otherActivationTraces,
                 ...activationTraces
             ];
 
@@ -1193,6 +1222,7 @@
                 appData.clinical_electrogram_woi_start = payload.clinical_electrogram_woi_start;
                 appData.clinical_electrogram_woi_end = payload.clinical_electrogram_woi_end;
                 appData.activation_uni = payload.activation_uni;
+                appData.activation_uni_all = payload.activation_uni_all;
                 clearMeshInterpolation();
                 for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
                     editedSegmentIds.add(segmentId);

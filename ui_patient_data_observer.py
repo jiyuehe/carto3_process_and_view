@@ -142,6 +142,15 @@ def load_mesh_data(name_prefix):
         catheter.get('mapping_electrogram_unipolar_activation_within_woi', []),
         dtype=object,
     )
+    activation_data = utility.ui_functions.grab_activations_within_window_of_interest(
+        dict(catheter),
+        int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
+        int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
+    )
+    activation_uni_all = activation_data[
+        'mapping_electrogram_unipolar_activation_all'
+    ]
+    catheter['mapping_electrogram_unipolar_activation_all'] = activation_uni_all
 
     median_cycle_length = int(catheter['cycle_length'])
 
@@ -189,6 +198,7 @@ def load_mesh_data(name_prefix):
         'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
         'egm_ref': egm_ref,
         'activation_uni': activation_uni,
+        'activation_uni_all': activation_uni_all,
         'median_cycle_length': median_cycle_length,
         'clinical_electrogram_woi_start': int(np.asarray(catheter['clinical_electrogram_woi_start']).item()),
         'clinical_electrogram_woi_end': int(np.asarray(catheter['clinical_electrogram_woi_end']).item()),
@@ -528,6 +538,10 @@ def ui_data_payload():
             np.asarray(segment, dtype=float).tolist()
             for segment in data_store['activation_uni']
         ],
+        'activation_uni_all': [
+            [np.asarray(channel, dtype=float).tolist() for channel in segment]
+            for segment in data_store['activation_uni_all']
+        ],
         'segment_count': int(data_store['segment_count']),
         'segment_electrode_count': int(data_store['segment_electrode_count']),
         'n_segments': int(data_store['segment_count']),
@@ -701,13 +715,20 @@ def update_window_of_interest():
         )
         activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
         updated_activation = updated_catheter[activation_key]
+        updated_activation_all = updated_catheter[
+            'mapping_electrogram_unipolar_activation_all'
+        ]
 
         data_store['clinical_data']['clinical_electrogram_woi_start'] = woi_start
         data_store['clinical_data']['clinical_electrogram_woi_end'] = woi_end
         data_store['clinical_data'][activation_key] = updated_activation
+        data_store['clinical_data'][
+            'mapping_electrogram_unipolar_activation_all'
+        ] = updated_activation_all
         data_store['clinical_electrogram_woi_start'] = woi_start
         data_store['clinical_electrogram_woi_end'] = woi_end
         data_store['activation_uni'] = updated_activation
+        data_store['activation_uni_all'] = updated_activation_all
 
     return jsonify(utility.ui_functions.json_safe({
         'status': 'ok',
@@ -715,6 +736,10 @@ def update_window_of_interest():
         'clinical_electrogram_woi_end': woi_end,
         'activation_uni': [np.asarray(segment, dtype=float).tolist()
                            for segment in updated_activation],
+        'activation_uni_all': [
+            [np.asarray(channel, dtype=float).tolist() for channel in segment]
+            for segment in updated_activation_all
+        ],
     }))
 
 
