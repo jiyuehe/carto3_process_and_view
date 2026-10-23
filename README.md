@@ -17,4 +17,3 @@ Screen capture of the user interface:
 # How to run
 1. process_electrogram.py  
 2. ui_patient_data_observer.py 
- 
