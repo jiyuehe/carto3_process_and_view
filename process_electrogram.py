@@ -41,7 +41,7 @@ name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 # setting
 # ==============================
-name_prefix = name_prefixes[29]
+name_prefix = name_prefixes[17]
 # ==============================
 
 #%%
@@ -60,12 +60,6 @@ segment_id_to_delete = []
 for seg_idx, seg in enumerate(segment_positions):
     if seg is None: # it is missing all electrode positions
         segment_id_to_delete.append(seg_idx)
-    elif seg is not None:
-        # check if it is missing a few electrode positions
-        n_electrode_position = seg.shape[0]
-        n_electrogram = catheter['mapping_electrogram_unipolar'][seg_idx].shape[1]
-        if n_electrode_position != n_electrogram:
-            segment_id_to_delete.append(seg_idx)
 
 segment_ids_to_delete = set(segment_id_to_delete)
 original_segment_count = len(segment_positions)
@@ -76,7 +70,7 @@ for field_name, field_values in catheter.items():
             for segment_id, value in enumerate(field_values)
             if segment_id not in segment_ids_to_delete
         ]
-
+#%%
 debug_plot = 0
 if debug_plot: # plot the recordings
     recording_groups = (
