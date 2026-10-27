@@ -51,7 +51,7 @@ def available_mesh_names():
         if (directory['data'] / catheter_path).is_file():
             names.append(catheter_path.name[:-len(suffix)])
     
-    return sorted(names, key=str.casefold)
+    return sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 
 def load_npz_values(path):

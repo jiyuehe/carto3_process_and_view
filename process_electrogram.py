@@ -37,11 +37,11 @@ names = []
 for catheter_path in directory['data'].glob(f'*{suffix}'):
     if (directory['data'] / catheter_path).is_file():
         names.append(catheter_path.name[:-len(suffix)])
-name_prefixes = sorted(names, key=str.casefold)
+name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 # setting
 # ==============================
-name_prefix = name_prefixes[8]
+name_prefix = name_prefixes[29]
 # ==============================
 
 #%%
@@ -588,50 +588,58 @@ for n in range(n_segment):
 
     # refine activation time detections
     # ------------------------------
-    # adaptive activation template length based on the morphology of the unipolar electrograms
-    signal = egm_unipolar_filtered
-    peak_indices = activation_times_unipolar
-    half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
-    template_len = 2 * half_window + 1
+    no_activation_electrode = 0
+    for i in range(0,len(activation_times_unipolar)):
+        if activation_times_unipolar[i].size == 0:
+            no_activation_electrode = no_activation_electrode + 1
 
-    # for each unipolar electrogram, create morphology template from the detected activation times
-    activation_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window,consistency_threshold=0.4)
+    if no_activation_electrode != len(activation_times_unipolar):
+        # adaptive activation template length based on the morphology of the unipolar electrograms
+        signal = egm_unipolar_filtered
+        peak_indices = activation_times_unipolar
+        half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
+        template_len = 2 * half_window + 1
 
-    # for each unipolar electrogram channel, crosscorrelate the activation template with the QRS-subtracted unipolar electrogram to refine the activation time detections
-    activation_times_unipolar_refined = [np.array([0], dtype=int) for _ in range(n_channels)]
-    for channel_idx in range(n_channels):
-        electrogram = qrs_subtracted[:, channel_idx].astype(float)
-        template = activation_template_unipolar[channel_idx, :].astype(float)
+        # for each unipolar electrogram, create morphology template from the detected activation times
+        activation_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window,consistency_threshold=0.4)
 
-        template_centered = template - np.median(template)
-        electrogram_centered = electrogram - np.median(electrogram)
+        # for each unipolar electrogram channel, crosscorrelate the activation template with the QRS-subtracted unipolar electrogram to refine the activation time detections
+        activation_times_unipolar_refined = [np.array([0], dtype=int) for _ in range(n_channels)]
+        for channel_idx in range(n_channels):
+            electrogram = qrs_subtracted[:, channel_idx].astype(float)
+            template = activation_template_unipolar[channel_idx, :].astype(float)
 
-        # normalize the cross-correlation to find the lag that best aligns the template with this channel
-        cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
+            template_centered = template - np.median(template)
+            electrogram_centered = electrogram - np.median(electrogram)
 
-        # find out peak threshold
-        correlation_baseline = np.median(cross_correlation)
-        correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
-        peak_height_threshold = max(
-            correlation_baseline + 2 * correlation_noise,
-            0.02 * np.max(cross_correlation),
-        )
-        peak_prominence_threshold = max(2 * correlation_noise, 0.0)
+            # normalize the cross-correlation to find the lag that best aligns the template with this channel
+            cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
 
-        correlation_peaks, _ = find_peaks(
-            np.nan_to_num(cross_correlation, nan=-np.inf),
-            distance=minimum_activation_distance,
-            height=peak_height_threshold,
-            prominence=peak_prominence_threshold,
-        )
+            # find out peak threshold
+            correlation_baseline = np.median(cross_correlation)
+            correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
+            peak_height_threshold = max(
+                correlation_baseline + 2 * correlation_noise,
+                0.02 * np.max(cross_correlation),
+            )
+            peak_prominence_threshold = max(2 * correlation_noise, 0.0)
 
-        # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
-        correlation_peaks = correlation_peaks[
-            (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
-        ]
+            correlation_peaks, _ = find_peaks(
+                np.nan_to_num(cross_correlation, nan=-np.inf),
+                distance=minimum_activation_distance,
+                height=peak_height_threshold,
+                prominence=peak_prominence_threshold,
+            )
 
-        if len(correlation_peaks) != 0:
-            activation_times_unipolar_refined[channel_idx] = correlation_peaks
+            # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
+            correlation_peaks = correlation_peaks[
+                (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
+            ]
+
+            if len(correlation_peaks) != 0:
+                activation_times_unipolar_refined[channel_idx] = correlation_peaks
+    elif no_activation_electrode == len(activation_times_unipolar):
+        activation_times_unipolar_refined = activation_times_unipolar
 
     mapping_electrogram_unipolar_activation[n] = activation_times_unipolar_refined
 
