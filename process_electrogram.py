@@ -41,7 +41,7 @@ name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
 
-for name_id in len(name_prefixes):
+for name_id in range(0,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -743,14 +743,14 @@ for name_id in len(name_prefixes):
         activation_array[segment_id, :] = segment_activations
     catheter['mapping_electrogram_unipolar_activation'] = activation_array
 
-    for field_name in (
-        'coronary_sinus_position_unipolar',
-        'coronary_sinus_position_bipolar',
-    ):
-        values = catheter[field_name]
-        object_array = np.empty(len(values), dtype=object)
-        object_array[:] = values
-        catheter[field_name] = object_array
+    # for field_name in (
+    #     'coronary_sinus_position_unipolar',
+    #     'coronary_sinus_position_bipolar',
+    # ):
+    #     values = catheter[field_name]
+    #     object_array = np.empty(len(values), dtype=object)
+    #     object_array[:] = values
+    #     catheter[field_name] = object_array
 
     #%%
     # project electrode positions onto the mesh surface
