@@ -16,4 +16,8 @@ Screen capture of the user interface:
 
 # How to run
 1. process_electrogram.py  
-2. ui_patient_data_observer.py 
+2. ui_patient_data_observer.py
+
+The UI lists catheter files only after `process_electrogram.py` has added the
+mesh projections and activation data. If no processed files are available, the
+UI exits with a message prompting you to run the processing step first.

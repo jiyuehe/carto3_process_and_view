@@ -37,6 +37,20 @@ SMOOTHING_SPATIAL_SIGMA = 2.5
 SMOOTHING_EFFECTIVE_RADIUS = 3.0 * SMOOTHING_SPATIAL_SIGMA
 SMOOTHING_HUBER_FACTOR = 1.5
 SMOOTHING_DIFFUSION_STEP = 0.5
+UI_REQUIRED_CATHETER_FIELDS = {
+    'electrode_positions',
+    'electrode_positions_on_original_mesh_all',
+    'electrode_positions_on_refined_mesh_all',
+    'geometry_original_vertex',
+    'geometry_original_face',
+    'vertex',
+    'face',
+    'mapping_electrogram_unipolar_activation',
+    'mapping_electrogram_unipolar_qrs_subtracted',
+    'clinical_electrogram_woi_start',
+    'clinical_electrogram_woi_end',
+    'cycle_length',
+}
 
 #%%
 # setting
@@ -45,11 +59,14 @@ save_lock = threading.RLock()
 
 
 def available_mesh_names():
-    suffix = '_catheter.npz'
+    suffix = '_carto_catheter_processed.npz'
     names = []
     for catheter_path in directory['data'].glob(f'*{suffix}'):
-        if (directory['data'] / catheter_path).is_file():
-            names.append(catheter_path.name[:-len(suffix)])
+        if not catheter_path.is_file():
+            continue
+        with np.load(catheter_path, allow_pickle=True) as catheter:
+            if UI_REQUIRED_CATHETER_FIELDS.issubset(catheter.files):
+                names.append(catheter_path.name[:-len(suffix)])
     
     return sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
@@ -124,7 +141,14 @@ def prepare_surface_distance_data(vertices, faces, sample_points):
 
 def load_mesh_data(name_prefix):
     """Load and prepare every value used by the UI for one data set."""
-    catheter = load_npz_values(directory['data'] / f'{name_prefix}_catheter.npz')
+    catheter = load_npz_values(directory['data'] / f'{name_prefix}_carto_catheter_processed.npz')
+    missing_fields = UI_REQUIRED_CATHETER_FIELDS.difference(catheter)
+    if missing_fields:
+        missing_fields_list = ', '.join(sorted(missing_fields))
+        raise ValueError(
+            f'{name_prefix}_catheter.npz is missing processed UI data: '
+            f'{missing_fields_list}. Run process_electrogram.py first.'
+        )
 
     electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
     segment_count = len(electrode_positions)
@@ -788,6 +812,11 @@ def save_activation_times():
 
 #%%
 mesh_names = available_mesh_names()
+if not mesh_names:
+    raise RuntimeError(
+        f'No processed catheter data found in {directory["data"]}. '
+        'Run process_electrogram.py first.'
+    )
 initial_mesh_name = mesh_names[0]
 data_store = load_mesh_data(initial_mesh_name)
 
