@@ -45,7 +45,7 @@ save_lock = threading.RLock()
 
 
 def available_mesh_names():
-    suffix = '_carto_catheter.npz'
+    suffix = '_carto_catheter_processed.npz'
     names = []
     for catheter_path in directory['data'].glob(f'*{suffix}'):
         if not catheter_path.is_file():
@@ -67,7 +67,6 @@ def load_npz_values(path):
 
 
 def prepare_surface_distance_data(vertices, faces, sample_points):
-    """Prepare mesh connectivity used by coverage masking and sample smoothing."""
     vertices = np.asarray(vertices, dtype=np.float64)
     faces = np.asarray(faces, dtype=np.int64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
@@ -125,7 +124,6 @@ def prepare_surface_distance_data(vertices, faces, sample_points):
 
 
 def load_mesh_data(name_prefix):
-    """Load and prepare every value used by the UI for one data set."""
     catheter = load_npz_values(directory['data'] / f'{name_prefix}_carto_catheter_processed.npz')
 
     electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
@@ -174,6 +172,8 @@ def load_mesh_data(name_prefix):
         catheter['geometry_original_face'],
         electrode_positions_on_original_mesh_all,
     )
+
+    
     refined_surface_data = prepare_surface_distance_data(
         catheter['vertex'],
         catheter['face'],
@@ -330,7 +330,6 @@ def diffuse_mesh_values(values, surface_data):
 
 
 def aggregate_vertex_samples(values, vertex_indices, circular):
-    """Robustly merge projected samples assigned to the same mesh vertex."""
     order = np.argsort(vertex_indices, kind='stable')
     sorted_vertices = vertex_indices[order]
     sorted_values = values[order]
@@ -442,7 +441,6 @@ def smooth_projected_samples(values, valid_samples, surface_data, circular=False
 def interpolate_activation_to_mesh(
     activation, sample_points, mesh_vertices, surface_data
 ):
-    """Interpolate electrode values, masking mesh regions without nearby data."""
     activation = np.asarray(activation, dtype=np.float64)
     mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
@@ -516,7 +514,6 @@ app = Flask(__name__, template_folder=directory['home'], static_folder=directory
 
 
 def ui_data_payload():
-    """Build the initial browser payload for the currently selected mesh."""
     return {
         'name_prefix': data_store['name_prefix'],
         'mesh_names': mesh_names,
@@ -762,7 +759,7 @@ def save_activation_times():
         activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
         save_path = (
             data_store['directory']['data']
-            / f"{data_store['name_prefix']}_catheter.npz"
+            / f"{data_store['name_prefix']}_carto_catheter_processed.npz"
         )
         clinical_data = data_store['clinical_data']
         updated_activation = updated_activation_array(clinical_data[activation_key], updates)

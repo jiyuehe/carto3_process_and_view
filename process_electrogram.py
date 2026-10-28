@@ -40,7 +40,6 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-
 for name_id in range(0,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
@@ -754,8 +753,8 @@ for name_id in range(0,len(name_prefixes)):
 
     #%%
     # project electrode positions onto the mesh surface
-    data = np.load(directory['data'] / f'{name_prefix}_mesh.npz', allow_pickle=True)
-    mesh = {k: data[k] for k in data.files} # load mesh data
+    
+    mesh = catheter['mesh'].item()
 
     original_vertex = mesh['geometry_original_vertex']
     original_face = mesh['geometry_original_face']
