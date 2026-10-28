@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in range(0,len(name_prefixes)):
+for name_id in [0]: # range(30,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -122,7 +122,8 @@ for name_id in range(0,len(name_prefixes)):
     surface_ecg_sum = [None for _ in range(n_segment)]
     cycle_lengths_per_segment = [None for _ in range(n_segment)]
     for n in range(n_segment):
-        print(f'recording segment id {n} in [0, {n_segment-1}]')
+        if n % (n_segment//4) == 0:
+            print(f'    recording segment id {n} in [0, {n_segment-1}]')
 
         # QRS timing detection from the surface ECG
         # ------------------------------
@@ -727,7 +728,7 @@ for name_id in range(0,len(name_prefixes)):
     catheter['cycle_lengths_per_segment'] = cycle_lengths_per_segment
     catheter['cycle_length'] = median_cycle_length
 
-    print(f'median cycle length across all segments: {median_cycle_length} ms')
+    print(f'    median cycle length across all segments: {median_cycle_length} ms')
 
     #%%
     # grab activations within window of interest
@@ -766,7 +767,7 @@ for name_id in range(0,len(name_prefixes)):
         positions = catheter['mapping_position_unipolar'][n]
         electrode_positions.append(positions)
 
-    print('project electrodes to original and refined meshes')
+    print('    project electrodes to original and refined meshes')
     electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
     projection_normal_vicinity = 10.0 # mesh coordinate units; electrodes farther from every nearby vertex-normal line are rejected
     projection_max_distance = 20.0 # mesh coordinate units along the bidirectional vertex-normal line
@@ -790,12 +791,6 @@ for name_id in range(0,len(name_prefixes)):
     )
     refined_rejected_count = np.count_nonzero(
         ~np.all(np.isfinite(electrode_positions_on_refined_mesh_all), axis=1)
-    )
-    print(
-        f'rejected {original_rejected_count} original-mesh projections and '
-        f'{refined_rejected_count} refined-mesh projections outside the '
-        f'{projection_normal_vicinity:g}-unit normal vicinity or '
-        f'{projection_max_distance:g}-unit maximum projection distance'
     )
 
     catheter['geometry_original_vertex'] = original_vertex
@@ -872,4 +867,5 @@ for name_id in range(0,len(name_prefixes)):
         )
         fig.show()
 
+#%%
 print('done')
