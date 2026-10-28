@@ -66,6 +66,7 @@
                         <span class="input-unit">ms</span>
                         <span id="woiStatus" class="woi-status" role="status" aria-live="polite"></span>
                     </form>
+                    <button type="button" id="btnCleanUp" disabled>Clean</button>
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggleInterpolateMesh">
                         <span class="toggle-slider"></span>
@@ -100,6 +101,7 @@
 
         function updateSaveButton() {
             const saveButton = document.getElementById('btnSave');
+            const cleanUpButton = document.getElementById('btnCleanUp');
             const editCount = editedSegmentIds.size;
             const hasInvalidActivation = Boolean(
                 document.querySelector('.activation-input[aria-invalid="true"]')
@@ -107,6 +109,8 @@
             saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
             saveButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
                 || hasInvalidActivation || editCount === 0;
+            cleanUpButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
+                || hasInvalidActivation;
         }
 
         function setSavingState(saving) {
@@ -166,6 +170,95 @@
             }
             return all;
         }
+
+        function findActivationOutliers(activations, positions, radius = 10) {
+            const samples = [];
+            const cells = new Map();
+            const cellKey = (x, y, z) => `${x},${y},${z}`;
+
+            for (let segmentId = 0; segmentId < activations.length; segmentId++) {
+                const segmentValues = activations[segmentId] || [];
+                const segmentPositions = positions[segmentId] || [];
+                for (let electrodeId = 0; electrodeId < segmentValues.length; electrodeId++) {
+                    const value = segmentValues[electrodeId];
+                    const position = segmentPositions[electrodeId];
+                    if (!Number.isFinite(value) || value === 0 || !Array.isArray(position)
+                            || position.length < 3 || !position.slice(0, 3).every(Number.isFinite)) {
+                        continue;
+                    }
+
+                    const cell = position.slice(0, 3).map(coordinate => Math.floor(coordinate / radius));
+                    const sampleId = samples.length;
+                    samples.push({ segmentId, electrodeId, value, position, cell });
+                    const key = cellKey(...cell);
+                    if (!cells.has(key)) cells.set(key, []);
+                    cells.get(key).push(sampleId);
+                }
+            }
+
+            const outliers = [];
+            const radiusSquared = radius * radius;
+            for (let sampleId = 0; sampleId < samples.length; sampleId++) {
+                const sample = samples[sampleId];
+                const neighbors = [];
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dz = -1; dz <= 1; dz++) {
+                            const key = cellKey(sample.cell[0] + dx, sample.cell[1] + dy,
+                                sample.cell[2] + dz);
+                            for (const neighborId of cells.get(key) || []) {
+                                if (neighborId === sampleId) continue;
+                                const neighbor = samples[neighborId];
+                                const distanceSquared = sample.position.reduce((sum, coordinate, axis) =>
+                                    axis < 3 ? sum + (coordinate - neighbor.position[axis]) ** 2 : sum, 0);
+                                if (distanceSquared <= radiusSquared) neighbors.push(neighbor.value);
+                            }
+                        }
+                    }
+                }
+
+                if (neighbors.length === 0) continue;
+                neighbors.sort((a, b) => a - b);
+                const middle = Math.floor(neighbors.length / 2);
+                const reference = neighbors.length % 2
+                    ? neighbors[middle]
+                    : (neighbors[middle - 1] + neighbors[middle]) / 2;
+                if (Math.abs(sample.value - reference) >= 20) {
+                    outliers.push({ segmentId: sample.segmentId, electrodeId: sample.electrodeId });
+                }
+            }
+            return outliers;
+        }
+
+        document.getElementById('btnCleanUp').addEventListener('click', () => {
+            if (!appData || isSaving || isUpdatingWoi || isSwitchingMesh
+                    || document.querySelector('.activation-input[aria-invalid="true"]')) return;
+
+            const outliers = findActivationOutliers(appData.activation_uni, appData.electrode_positions);
+            if (outliers.length === 0) {
+                setSaveStatus(editedSegmentIds.size
+                    ? 'No outlier activations found; unsaved changes remain.'
+                    : 'No outlier activations found.', editedSegmentIds.size ? 'pending' : 'success');
+                return;
+            }
+
+            for (const { segmentId, electrodeId } of outliers) {
+                appData.activation_uni[segmentId][electrodeId] = 0;
+                editedSegmentIds.add(segmentId);
+            }
+            interpolationRequestId++;
+            clearMeshInterpolation();
+            document.getElementById('toggleEarliest').checked = false;
+            document.getElementById('toggleLatest').checked = false;
+            setSliderEnabled(true);
+            updateSaveButton();
+            setSaveStatus(`Cleared ${outliers.length} outlier activation${outliers.length === 1 ? '' : 's'}; unsaved changes.`, 'pending');
+            render3DPlot(true);
+            renderElectrogram();
+            if (document.getElementById('toggleInterpolateMesh').checked) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+            }
+        });
 
         function isRefinedMeshSelected() {
             return document.getElementById('toggleRefinedMesh').checked;
