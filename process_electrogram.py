@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in range(71,len(name_prefixes)):
+for name_id in range(85,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
