@@ -1090,7 +1090,7 @@
             } else {
                 validIndices.sort((a, b) => b.val - a.val);
             }
-            const ids = validIndices.slice(0, Math.min(validIndices.length, appData.segment_electrode_count)).map(x => x.id);
+            const ids = validIndices.map(x => x.id);
             render3DPlot(true);
             renderElectrogram(ids);
         }

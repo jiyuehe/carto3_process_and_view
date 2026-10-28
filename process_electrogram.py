@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in [0]: # range(30,len(name_prefixes)):
+for name_id in range(71,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -737,10 +737,10 @@ for name_id in [0]: # range(30,len(name_prefixes)):
     t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
     catheter = utility.ui_functions.grab_activations_within_window_of_interest(catheter,t_start,t_end)
 
-    # because the activation timings are of different amount depending on the electrogram, cannot directly save as .npz, therefore, do a transformation here in order to save the variable as .npz
-    activation_array = np.empty((n_segment, n_channels), dtype=object)
+    # Keep each segment's channel activations together even when channel counts differ.
+    activation_array = np.empty(n_segment, dtype=object)
     for segment_id, segment_activations in enumerate(catheter['mapping_electrogram_unipolar_activation']):
-        activation_array[segment_id, :] = segment_activations
+        activation_array[segment_id] = segment_activations
     catheter['mapping_electrogram_unipolar_activation'] = activation_array
 
     # for field_name in (
@@ -754,7 +754,6 @@ for name_id in [0]: # range(30,len(name_prefixes)):
 
     #%%
     # project electrode positions onto the mesh surface
-    
     mesh = catheter['mesh'].item()
 
     original_vertex = mesh['geometry_original_vertex']
@@ -768,7 +767,10 @@ for name_id in [0]: # range(30,len(name_prefixes)):
         electrode_positions.append(positions)
 
     print('    project electrodes to original and refined meshes')
-    electrode_positions_all = np.asarray(electrode_positions, dtype=float).reshape(-1, 3) # -1 tells NumPy to calculate the required number of rows automatically, 3 means exactly three columns: x, y, and z.
+    electrode_positions_all = np.concatenate(
+        [np.asarray(positions, dtype=float).reshape(-1, 3) for positions in electrode_positions],
+        axis=0,
+    )
     projection_normal_vicinity = 10.0 # mesh coordinate units; electrodes farther from every nearby vertex-normal line are rejected
     projection_max_distance = 20.0 # mesh coordinate units along the bidirectional vertex-normal line
     electrode_positions_on_original_mesh_all, _ = utility.ui_functions.project_electrodes_to_mesh(

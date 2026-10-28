@@ -637,9 +637,10 @@ def interpolate_activation():
         if activation.shape != expected_shape:
             return jsonify({'error': 'activation_uni has the wrong length for the selected segment'}), 400
 
-        activation_all = np.asarray(data_store['activation_uni'], dtype=float).copy()
-        activation_all[segment_id] = activation
-        activation_all = activation_all.reshape(-1)
+        activation_all = np.concatenate([
+            activation if index == segment_id else np.asarray(segment, dtype=float)
+            for index, segment in enumerate(data_store['activation_uni'])
+        ])
     if payload.get('full_hsv') is True:
         cycle_length = payload.get('cycle_length', data_store['median_cycle_length'])
         if isinstance(cycle_length, bool):
