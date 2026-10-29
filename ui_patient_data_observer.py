@@ -125,14 +125,18 @@ def prepare_surface_distance_data(vertices, faces, sample_points):
 
 def load_mesh_data(name_prefix):
     catheter = load_npz_values(directory['data'] / f'{name_prefix}_carto_catheter_processed.npz')
+    with np.load(
+        directory['data'] / f'{name_prefix}_carto_catheter.npz',
+        allow_pickle=True,
+    ) as original_catheter:
+        egm_uni_original = np.asarray(
+            original_catheter['mapping_electrogram_unipolar'], dtype=object
+        )
 
     electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
     segment_count = len(electrode_positions)
     segment_electrode_count = (
         int(electrode_positions[0].shape[0]) if segment_count else 0
-    )
-    egm_uni_original = np.asarray(
-        catheter.get('mapping_electrogram_unipolar', []), dtype=object
     )
     egm_uni_qrs_subtracted = np.asarray(
         catheter.get('mapping_electrogram_unipolar_qrs_subtracted', []), dtype=object
