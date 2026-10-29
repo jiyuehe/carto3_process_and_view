@@ -24,9 +24,9 @@ import sys
 sys.path.insert(0, str(configuration.COMMON_DIR))
 import common
 
-import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default = 'browser'
+# import plotly.graph_objects as go
+# import plotly.io as pio
+# pio.renderers.default = 'browser'
 
 #%%
 directory = configuration.directory_setup()
@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in [72]: #range(0,len(name_prefixes)):
+for name_id in [79,83,84]: #range(0,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
