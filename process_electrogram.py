@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in range(85,len(name_prefixes)):
+for name_id in range(0,1):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -722,11 +722,12 @@ for name_id in range(85,len(name_prefixes)):
     all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
     median_cycle_length = np.median(all_cycle_lengths)
 
-    catheter['surface_ecg_sum'] = surface_ecg_sum
-    catheter['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
-    catheter['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
-    catheter['cycle_lengths_per_segment'] = cycle_lengths_per_segment
-    catheter['cycle_length'] = median_cycle_length
+    catheter_processed = {}
+    catheter_processed['surface_ecg_sum'] = surface_ecg_sum
+    catheter_processed['mapping_electrogram_unipolar_qrs_subtracted'] = mapping_electrogram_unipolar_qrs_subtracted
+    catheter_processed['mapping_electrogram_unipolar_activation'] = mapping_electrogram_unipolar_activation
+    catheter_processed['cycle_lengths_per_segment'] = cycle_lengths_per_segment
+    catheter_processed['cycle_length'] = median_cycle_length
 
     print(f'    median cycle length across all segments: {median_cycle_length} ms')
 
@@ -735,13 +736,13 @@ for name_id in range(85,len(name_prefixes)):
     half_window_size_of_woi = 400//2
     t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
     t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
-    catheter = utility.ui_functions.grab_activations_within_window_of_interest(catheter,t_start,t_end)
+    catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(catheter_processed,t_start,t_end)
 
     # Keep each segment's channel activations together even when channel counts differ.
     activation_array = np.empty(n_segment, dtype=object)
-    for segment_id, segment_activations in enumerate(catheter['mapping_electrogram_unipolar_activation']):
+    for segment_id, segment_activations in enumerate(catheter_processed['mapping_electrogram_unipolar_activation']):
         activation_array[segment_id] = segment_activations
-    catheter['mapping_electrogram_unipolar_activation'] = activation_array
+    catheter_processed['mapping_electrogram_unipolar_activation'] = activation_array
 
     # for field_name in (
     #     'coronary_sinus_position_unipolar',
@@ -795,16 +796,16 @@ for name_id in range(85,len(name_prefixes)):
         ~np.all(np.isfinite(electrode_positions_on_refined_mesh_all), axis=1)
     )
 
-    catheter['geometry_original_vertex'] = original_vertex
-    catheter['geometry_original_face'] = original_face
-    catheter['vertex'] = refined_vertex
-    catheter['face'] = refined_face
-    catheter['electrode_positions'] = electrode_positions
-    catheter['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
-    catheter['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
+    catheter_processed['geometry_original_vertex'] = original_vertex
+    catheter_processed['geometry_original_face'] = original_face
+    catheter_processed['vertex'] = refined_vertex
+    catheter_processed['face'] = refined_face
+    catheter_processed['electrode_positions'] = electrode_positions
+    catheter_processed['electrode_positions_on_original_mesh_all'] = electrode_positions_on_original_mesh_all
+    catheter_processed['electrode_positions_on_refined_mesh_all'] = electrode_positions_on_refined_mesh_all
 
     # savez will have error if channel counts differ between segments, need to convert to object type
-    for field_name, field_values in catheter.items():
+    for field_name, field_values in catheter_processed.items():
         if not isinstance(field_values, (list, tuple)):
             continue
         try:
@@ -812,10 +813,10 @@ for name_id in range(85,len(name_prefixes)):
         except ValueError:
             object_array = np.empty(len(field_values), dtype=object)
             object_array[:] = field_values
-            catheter[field_name] = object_array
+            catheter_processed[field_name] = object_array
 
     file_path = directory['data'] / f'{name_prefix}_carto_catheter_processed.npz'
-    np.savez(file_path, **catheter)
+    np.savez(file_path, **catheter_processed)
 
     debug_plot = 0
     if debug_plot == 1: # plot the electrode positions on the mesh surface
