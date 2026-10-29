@@ -24,9 +24,9 @@ import sys
 sys.path.insert(0, str(configuration.COMMON_DIR))
 import common
 
-# import plotly.graph_objects as go
-# import plotly.io as pio
-# pio.renderers.default = 'browser'
+import plotly.graph_objects as go
+import plotly.io as pio
+pio.renderers.default = 'browser'
 
 #%%
 directory = configuration.directory_setup()
