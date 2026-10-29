@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in range(0,len(name_prefixes)):
+for name_id in [72]: #range(0,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -72,35 +72,51 @@ for name_id in range(0,len(name_prefixes)):
     #%%
     debug_plot = 0
     if debug_plot: # plot the recordings
-        recording_groups = (
-            ('Mapping unipolar electrograms', catheter['mapping_electrogram_unipolar'], mapping_name_unipolar, 'blue'),
-            ('Surface electrograms', catheter['surface_electrogram'], surface_name, 'blue'),
-        )
-
         for segment_id in [7]: #range(len(catheter['mapping_electrogram_unipolar'])):
             fig, axes = plt.subplots(1, 2, figsize=(14, 10), sharex=True)
 
-            for axis, (title, segment_recordings, channel_names, color) in zip(axes, recording_groups):
-                recordings = np.asarray(segment_recordings[segment_id], dtype=float)
-                if recordings.ndim == 1:
-                    recordings = recordings[:, None]
+            title = 'Mapping unipolar electrograms'
+            recordings = catheter['mapping_electrogram_unipolar'][segment_id]
+            names = mapping_name_unipolar[segment_id]
+            axis = axes[0]
 
-                channel_magnitude = np.ptp(recordings, axis=0)
-                trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
-                trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
+            channel_magnitude = np.ptp(recordings, axis=0)
+            trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
+            trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
 
-                axis.plot(
-                    np.arange(recordings.shape[0]),
-                    recordings + trace_offsets,
-                    color=color,
-                    linewidth=1,
-                )
-                axis.set_title(title)
-                axis.set_yticks(trace_offsets)
-                axis.set_yticklabels(channel_names)
-                axis.grid(False)
+            axis.plot(
+                np.arange(recordings.shape[0]),
+                recordings + trace_offsets,
+                color='blue',
+                linewidth=1,
+            )
+            axis.set_title(title)
+            axis.set_yticks(trace_offsets)
+            axis.set_yticklabels(names)
+            axis.grid(False)
+            axis.set_xlabel('Time (ms)')
 
-            axes[-1].set_xlabel('Time (ms)')
+            title = 'Surface electrograms'
+            recordings = catheter['surface_electrogram'][segment_id]
+            names = surface_name
+            axis = axes[1]
+
+            channel_magnitude = np.ptp(recordings, axis=0)
+            trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
+            trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
+
+            axis.plot(
+                np.arange(recordings.shape[0]),
+                recordings + trace_offsets,
+                color='blue',
+                linewidth=1,
+            )
+            axis.set_title(title)
+            axis.set_yticks(trace_offsets)
+            axis.set_yticklabels(names)
+            axis.grid(False)
+            axis.set_xlabel('Time (ms)')
+
             fig.suptitle(
                 f'Recording segment {segment_id} of '
                 f'[0, {len(catheter["mapping_electrogram_unipolar"]) - 1}]'
