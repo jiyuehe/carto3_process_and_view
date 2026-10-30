@@ -46,7 +46,7 @@ print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_lo
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in range(63,127):
+for map_id in range(130,186):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA':
