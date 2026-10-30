@@ -15,6 +15,7 @@
 
 #%%
 import numpy as np
+from pathlib import Path
 from scipy.signal import butter, find_peaks, sosfiltfilt
 import matplotlib.pyplot as plt
 import utility
@@ -30,20 +31,14 @@ pio.renderers.default = 'browser'
 
 #%%
 directory = configuration.directory_setup()
-
-# grab all the available patient data file names
+patients = common.read_info_csv(directory)
 suffix = '_carto_catheter.npz'
-names = []
-for catheter_path in directory['data'].glob(f'*{suffix}'):
-    if (directory['data'] / catheter_path).is_file():
-        names.append(catheter_path.name[:-len(suffix)])
-name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in range(39,40):
-    print(f'process {name_prefixes[name_id]}')
-
-    name_prefix = name_prefixes[name_id]
+for map_id in [233,235]:#range(39,40):
+    patient = patients[map_id]
+    name_prefix = f'{patient['id']}_{patient['mesh']}'
+    print(f'process {name_prefix}')
 
     # load electrogram recording data
     data = np.load(directory['data'] / f'{name_prefix}{suffix}', allow_pickle=True)
