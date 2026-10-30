@@ -40,7 +40,7 @@ for catheter_path in directory['data'].glob(f'*{suffix}'):
 name_prefixes = sorted(names, key=lambda name: int(name.split('_', 1)[0]))
 
 #%%
-for name_id in [79,83,84]: #range(0,len(name_prefixes)):
+for name_id in range(0,len(name_prefixes)):
     print(f'process {name_prefixes[name_id]}')
 
     name_prefix = name_prefixes[name_id]
@@ -69,7 +69,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
                 for segment_id, value in enumerate(field_values)
                 if segment_id not in segment_ids_to_delete
             ]
-    #%%
+    
     debug_plot = 0
     if debug_plot: # plot the recordings
         for segment_id in [7]: #range(len(catheter['mapping_electrogram_unipolar'])):
@@ -128,7 +128,6 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
             plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
             plt.close(fig)
 
-    #%%
     # loop through each recording segment
     mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
     surface_electrogram = catheter['surface_electrogram']
@@ -375,7 +374,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
             fig_path = directory['result'] / f'qrs_subtraction_{n}.png'
             plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
             plt.close()
-
+#%%
         # activation time detection on the QRS-subtracted unipolar electrograms
         # ------------------------------
         # for each qrs subtracted unipolar electrogram, do auto correlation to find out its cycle length
@@ -732,7 +731,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
             fig_path = directory['result'] / f'activation_refined_{n}.png'
             plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
             plt.close()
-
+#%%
     # find out the cycle length of all the unipolar electrograms across all recording segments
     all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
     all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
@@ -759,15 +758,6 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
     for segment_id, segment_activations in enumerate(catheter_processed['mapping_electrogram_unipolar_activation']):
         activation_array[segment_id] = segment_activations
     catheter_processed['mapping_electrogram_unipolar_activation'] = activation_array
-
-    # for field_name in (
-    #     'coronary_sinus_position_unipolar',
-    #     'coronary_sinus_position_bipolar',
-    # ):
-    #     values = catheter[field_name]
-    #     object_array = np.empty(len(values), dtype=object)
-    #     object_array[:] = values
-    #     catheter[field_name] = object_array
 
     #%%
     # project electrode positions onto the mesh surface
@@ -835,7 +825,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
     np.savez(file_path, **catheter_processed)
 
     debug_plot = 0
-    if debug_plot == 1: # plot the electrode positions on the mesh surface
+    if debug_plot == 1: # plot the electrode positions and the projections on the mesh surface
         fig = go.Figure()
         fig.add_trace(go.Mesh3d(
             x=original_vertex[:, 0], y=original_vertex[:, 1], z=original_vertex[:, 2],
@@ -856,7 +846,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
         ))
         fig.update_layout(
             title='Electrode positions projected onto original mesh surface',
-            scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
+            scene=dict(xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), aspectmode='data', dragmode='orbit'),
             margin=dict(l=0, r=0, b=0, t=40)
         )
         fig.show()
@@ -881,7 +871,7 @@ for name_id in [79,83,84]: #range(0,len(name_prefixes)):
         ))
         fig.update_layout(
             title='Electrode positions projected onto refined mesh surface',
-            scene=dict(xaxis_title='X', yaxis_title='Y', zaxis_title='Z', aspectmode='data'),
+            scene=dict(xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), aspectmode='data', dragmode='orbit'),
             margin=dict(l=0, r=0, b=0, t=40)
         )
         fig.show()
