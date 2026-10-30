@@ -32,10 +32,21 @@ pio.renderers.default = 'browser'
 #%%
 directory = configuration.directory_setup()
 patients = common.read_info_csv(directory)
-suffix = '_carto_catheter.npz'
+
+n_left_atrium = 0
+n_loaded = 0
+for i in range(0,len(patients)):
+    if patients[i]['atrium_flag'] == 'LA':
+        n_left_atrium = n_left_atrium + 1
+
+    if patients[i]['status'] == 'loaded':
+        n_loaded = n_loaded + 1
+
+print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_loaded} maps.')
 
 #%%
-for map_id in [233,235]:#range(39,40):
+suffix = '_carto_catheter.npz'
+for map_id in [0]:#range(39,40):
     patient = patients[map_id]
     name_prefix = f'{patient['id']}_{patient['mesh']}'
     print(f'process {name_prefix}')
