@@ -72,7 +72,7 @@ def mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unip
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, surface_signal_sum, surface_signal_smooth, qrs_peak_indices):
+def QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices):
     fig, ax = plt.subplots(figsize=(8, 8))
     n_channel = egm_surface.shape[1]
 
@@ -84,7 +84,8 @@ def QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surf
 
     # plot each channel with an offset
     for channel_idx in range(n_channel):
-        ax.plot(egm_surface[:, channel_idx] + offsets[channel_idx], color='blue', linewidth=1)
+        ax.plot(egm_surface[:, channel_idx] + offsets[channel_idx], color='magenta', linewidth=1)
+        ax.plot(egm_surface_filtered[:, channel_idx] + offsets[channel_idx], color='blue', linewidth=1)
 
     # plot the summed signal scaled and placed at bottom
     surface_signal_sum_scaled = surface_signal_sum * (max_magnitude / np.ptp(surface_signal_sum)) - spacing

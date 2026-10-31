@@ -105,8 +105,19 @@ for map_id in [0]: #range(0,len(patients)):
             # ------------------------------
             # combine the 12 surface ECG leads into one signal for QRS detection
             egm_surface = surface_electrogram[n]
+
+            sampling_rate_hz = 1000
+            surface_bandpass_hz = (10, 400)
+            surface_filter = butter(
+                4,
+                surface_bandpass_hz,
+                btype='bandpass',
+                fs=sampling_rate_hz,
+                output='sos',
+            )
+            egm_surface_filtered = sosfiltfilt(surface_filter, egm_surface, axis=0)
             
-            surface_signal = np.abs(egm_surface) # take abs first so positive and negative deflections do not cancel each other
+            surface_signal = np.abs(egm_surface_filtered) # take abs first so positive and negative deflections do not cancel each other
             surface_signal_sum = np.sum(surface_signal, axis=1)
 
             # smooth to reduce noise and jitter
@@ -127,12 +138,11 @@ for map_id in [0]: #range(0,len(patients)):
             if debug_plot: 
                 result_folder = directory['result']
                 surface_name = catheter['surface_name']
-                utility.debug_plots.QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
+                utility.debug_plots.QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
 #%%
             # bandpass filter the unipolar electrogram
             # ------------------------------
             egm_unipolar = np.asarray(mapping_electrogram_unipolar[n], dtype=float)
-            sampling_rate_hz = 1000
             unipolar_bandpass_hz = (20, 80)
             unipolar_filter = butter(
                 4,
