@@ -46,7 +46,7 @@ print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_lo
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in range(130,186):
+for map_id in [0]: #range(0,len(patients)):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA':
@@ -77,64 +77,17 @@ for map_id in range(130,186):
                     for segment_id, value in enumerate(field_values)
                     if segment_id not in segment_ids_to_delete
                 ]
-        
+
+        # plot the mapping catheter and surface lead electrograms
         debug_plot = 0
-        if debug_plot: # plot the recordings
-            for segment_id in [7]: #range(len(catheter['mapping_electrogram_unipolar'])):
-                fig, axes = plt.subplots(1, 2, figsize=(14, 10), sharex=True)
-
-                title = 'Mapping unipolar electrograms'
-                recordings = catheter['mapping_electrogram_unipolar'][segment_id]
-                names = mapping_name_unipolar[segment_id]
-                axis = axes[0]
-
-                channel_magnitude = np.ptp(recordings, axis=0)
-                trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
-                trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
-
-                axis.plot(
-                    np.arange(recordings.shape[0]),
-                    recordings + trace_offsets,
-                    color='blue',
-                    linewidth=1,
-                )
-                axis.set_title(title)
-                axis.set_yticks(trace_offsets)
-                axis.set_yticklabels(names)
-                axis.grid(False)
-                axis.set_xlabel('Time (ms)')
-
-                title = 'Surface electrograms'
-                recordings = catheter['surface_electrogram'][segment_id]
-                names = surface_name
-                axis = axes[1]
-
-                channel_magnitude = np.ptp(recordings, axis=0)
-                trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
-                trace_offsets = np.arange(recordings.shape[1]) * trace_spacing
-
-                axis.plot(
-                    np.arange(recordings.shape[0]),
-                    recordings + trace_offsets,
-                    color='blue',
-                    linewidth=1,
-                )
-                axis.set_title(title)
-                axis.set_yticks(trace_offsets)
-                axis.set_yticklabels(names)
-                axis.grid(False)
-                axis.set_xlabel('Time (ms)')
-
-                fig.suptitle(
-                    f'Recording segment {segment_id} of '
-                    f'[0, {len(catheter["mapping_electrogram_unipolar"]) - 1}]'
-                )
-                fig.tight_layout()
-
-                # save the figure
-                fig_path = directory['result'] / f'recording_segment_{segment_id}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close(fig)
+        if debug_plot: 
+            segment_id = 10
+            result_folder = directory['result']
+            mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
+            mapping_name_unipolar = catheter['mapping_name_unipolar']
+            surface_electrogram = catheter['surface_electrogram']
+            surface_name = catheter['surface_name']
+            utility.debug_plots.mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unipolar, mapping_electrogram_unipolar, surface_name, surface_electrogram)
 
         # loop through each recording segment
         mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
@@ -152,6 +105,7 @@ for map_id in range(130,186):
             # ------------------------------
             # combine the 12 surface ECG leads into one signal for QRS detection
             egm_surface = surface_electrogram[n]
+            
             surface_signal = np.abs(egm_surface) # take abs first so positive and negative deflections do not cancel each other
             surface_signal_sum = np.sum(surface_signal, axis=1)
 
@@ -166,44 +120,15 @@ for map_id in range(130,186):
             min_qrs_spacing = 300 # ms
             qrs_half_window = 50 # ms before/after each detected QRS peak
             qrs_threshold = np.percentile(surface_signal_smooth, 95)
-            qrs_peak_indices, _ = find_peaks(surface_signal_smooth, distance=min_qrs_spacing, height=qrs_threshold)
+            qrs_peak_indices, _ = find_peaks(surface_signal_smooth, distance = min_qrs_spacing, height = qrs_threshold)
 
+            # show the surface ECGs and detected QRS peaks
             debug_plot = 0
-            if debug_plot: # show the surface ECG leads and detected QRS peaks
-                fig, ax = plt.subplots(figsize=(8, 8))
-                n_channel = egm_surface.shape[1]
-
-                # determine spacing based on signal magnitudes to separate traces visually
-                per_channel_magnitude = np.ptp(egm_surface, axis=0) # peak-to-peak voltage
-                max_magnitude = np.nanmean(per_channel_magnitude) 
-                spacing = max_magnitude * 1.5
-                offsets = np.arange(n_channel) * spacing
-
-                # plot each channel with an offset
-                for channel_idx in range(n_channel):
-                    ax.plot(egm_surface[:, channel_idx] + offsets[channel_idx], color='blue', linewidth=1)
-
-                # plot the summed signal scaled and placed at bottom
-                surface_signal_sum_scaled = surface_signal_sum * (max_magnitude / np.ptp(surface_signal_sum)) - spacing
-                surface_signal_smooth_scaled = surface_signal_smooth * (max_magnitude / np.ptp(surface_signal_smooth)) - spacing
-
-                ax.plot(surface_signal_sum_scaled, color='magenta', linewidth=1)
-                ax.plot(surface_signal_smooth_scaled, color='blue', linewidth=1)
-                ax.scatter(qrs_peak_indices, surface_signal_smooth_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
-                
-                ax.set_xlabel('Time (ms)')
-                yticks = np.concatenate(([-spacing], offsets))
-                ylabels = ['sum'] + list(surface_name)
-                ax.set_yticks(yticks)
-                ax.set_yticklabels(ylabels, fontsize=8)
-                ax.set_title(f'Surface ECGs and QRS detection (segment id {n} of [0, {n_segment-1}])')
-                plt.tight_layout()
-
-                # save the figure
-                fig_path = directory['result'] / f'qrs_timing_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close(fig)
-
+            if debug_plot: 
+                result_folder = directory['result']
+                surface_name = catheter['surface_name']
+                utility.debug_plots.QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
+#%%
             # bandpass filter the unipolar electrogram
             # ------------------------------
             egm_unipolar = np.asarray(mapping_electrogram_unipolar[n], dtype=float)

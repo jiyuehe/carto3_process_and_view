@@ -15,3 +15,4 @@
 
 from . import signal_processing
 from . import ui_functions
+from . import debug_plots
