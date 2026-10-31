@@ -243,9 +243,9 @@ for map_id in [0]: #range(0,len(patients)):
                     )
 
                     if good_signal_flag == 1:
-                        # clip the electrogram to within +/- mean(peak_values)
-                        mean_peak_value = np.mean(peak_values)
-                        electrogram = np.clip(electrogram, -mean_peak_value, mean_peak_value)
+                        # # clip the electrogram to within +/- mean(peak_values)
+                        # mean_peak_value = np.mean(peak_values)
+                        # electrogram = np.clip(electrogram, -mean_peak_value, mean_peak_value)
 
                         # find out the cycle length via autocorrelation
                         autocorrelation = np.correlate(electrogram, electrogram, mode='full')[n_samples - 1:]
@@ -255,30 +255,6 @@ for map_id in [0]: #range(0,len(patients)):
                         # blank out the first portion of the autocorrelation to avoid detecting the zero-lag peak and nearby peaks
                         autocorrelation[:150] = 0
                         candidate_lags, properties = find_peaks(autocorrelation,distance=150)
-
-                        # plot the autocorrelation of this channel
-                        debug_plot = 0
-                        if debug_plot: 
-                            time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
-                            fig, (electrogram_axis, autocorrelation_axis) = plt.subplots(2,1,figsize=(8, 8))
-                            electrogram_axis.plot(time_ms, electrogram, color='blue', linewidth=1.0)
-                            electrogram_axis.set_title('QRS-subtracted unipolar electrogram')
-                            electrogram_axis.set_xlabel('Time (ms)')
-                            electrogram_axis.set_ylabel('Voltage (mV)')
-
-                            autocorrelation_axis.plot(time_ms, autocorrelation, color='blue', linewidth=1.0)
-                            autocorrelation_axis.scatter(
-                                time_ms[candidate_lags],
-                                autocorrelation[candidate_lags],
-                                color='red',
-                                s=20,
-                                zorder=5,
-                            )
-                            autocorrelation_axis.set_title('Autocorrelation')
-                            autocorrelation_axis.set_xlabel('Lag (ms)')
-                            autocorrelation_axis.set_ylabel('Autocorrelation')
-                            fig.suptitle(f'Segment id {n} of [0, {n_segment-1}], channel {channel_idx}')
-                            fig.tight_layout()
 
                         if len(candidate_lags) > 0:
                             candidate_lags = candidate_lags[candidate_lags != 1]
@@ -292,9 +268,10 @@ for map_id in [0]: #range(0,len(patients)):
             cl = cycle_length_unipolar[np.isfinite(cycle_length_unipolar)] # remove NaN values
             cycle_length_this_segment = np.median(cl) if len(cl) > 0 else np.nan
 #%%
+            # plot the QRS-subtracted unipolar electrograms and their autocorrelations
             debug_plot = 0
-            if debug_plot: # plot the QRS-subtracted unipolar electrograms and their autocorrelations
-                time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
+            if debug_plot: 
+                time_ms = np.arange(n_samples)
                 signal_magnitude = np.ptp(qrs_subtracted, axis=0)
                 trace_spacing = max(1.0, np.nanmean(signal_magnitude) * 1.05)
                 trace_offsets = np.arange(n_channels) * trace_spacing
@@ -331,15 +308,16 @@ for map_id in [0]: #range(0,len(patients)):
 
                 for axis in axes:
                     axis.set_yticks(trace_offsets)
-                    axis.set_yticklabels(mapping_name_unipolar, fontsize=8)
+                    axis.set_yticklabels(mapping_name_unipolar[n], fontsize=8)
                     axis.grid(False)
 
-                axes[-1].set_xlabel('Time or lag (ms)')
-                fig.suptitle(f'find out cycle length via autocorrelation (segment id {n} of [0, {n_segment-1}])')
+                axes[0].set_xlabel('Time (ms)')
+                axes[1].set_xlabel('Lag (ms)')
+                fig.suptitle(f'find out cycle length via autocorrelation (segment id {n})')
                 fig.tight_layout()
 
                 # save the figure
-                fig_path = directory['result'] / f'autocorrelation_{n}.png'
+                fig_path = directory['result'] / f'5_autocorrelation_{n}.png'
                 plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
                 plt.close(fig)
 
