@@ -25,10 +25,6 @@ import sys
 sys.path.insert(0, str(configuration.COMMON_DIR))
 import common
 
-import plotly.graph_objects as go
-import plotly.io as pio
-pio.renderers.default = 'browser'
-
 #%%
 directory = configuration.directory_setup()
 patients = common.read_info_csv(directory)
@@ -419,7 +415,7 @@ for map_id in [0]: #range(0,len(patients)):
         catheter_processed['cycle_length'] = median_cycle_length
 
         print(f'    median cycle length across all segments: {median_cycle_length} ms')
-
+#%%
         # grab activations within window of interest
         # ------------------------------------------------------------
         half_window_size_of_woi = 400//2
@@ -501,55 +497,7 @@ for map_id in [0]: #range(0,len(patients)):
         # plot the electrode positions and the projections on the mesh surface
         debug_plot = 0
         if debug_plot == 1: 
-            fig = go.Figure()
-            fig.add_trace(go.Mesh3d(
-                x=original_vertex[:, 0], y=original_vertex[:, 1], z=original_vertex[:, 2],
-                i=original_face[:, 0], j=original_face[:, 1], k=original_face[:, 2],
-                color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
-            ))
-            p = electrode_positions_all
-            fig.add_trace(go.Scatter3d(
-                x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-                marker=dict(size=4, color='red'), name='Original electrodes',
-                legendgroup='original', showlegend=(n == 0)
-            ))
-            p = electrode_positions_on_original_mesh_all
-            fig.add_trace(go.Scatter3d(
-                x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-                marker=dict(size=4, color='blue'), name='Projected electrodes',
-                legendgroup='projected', showlegend=(n == 0)
-            ))
-            fig.update_layout(
-                title='Electrode positions projected onto original mesh surface',
-                scene=dict(xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), aspectmode='data', dragmode='orbit'),
-                margin=dict(l=0, r=0, b=0, t=40)
-            )
-            fig.show()
-
-            fig = go.Figure()
-            fig.add_trace(go.Mesh3d(
-                x=refined_vertex[:, 0], y=refined_vertex[:, 1], z=refined_vertex[:, 2],
-                i=refined_face[:, 0], j=refined_face[:, 1], k=refined_face[:, 2],
-                color='lightgray', opacity=0.5, name='Mesh', hoverinfo='skip'
-            ))
-            p = electrode_positions_all
-            fig.add_trace(go.Scatter3d(
-                x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-                marker=dict(size=4, color='red'), name='Original electrodes',
-                legendgroup='original', showlegend=(n == 0)
-            ))
-            p = electrode_positions_on_refined_mesh_all
-            fig.add_trace(go.Scatter3d(
-                x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-                marker=dict(size=4, color='blue'), name='Projected electrodes',
-                legendgroup='projected', showlegend=(n == 0)
-            ))
-            fig.update_layout(
-                title='Electrode positions projected onto refined mesh surface',
-                scene=dict(xaxis=dict(visible=False), yaxis=dict(visible=False), zaxis=dict(visible=False), aspectmode='data', dragmode='orbit'),
-                margin=dict(l=0, r=0, b=0, t=40)
-            )
-            fig.show()
+            utility.debug_plots.electrode_position_and_projection(original_vertex, original_face, electrode_positions_all, electrode_positions_on_original_mesh_all, refined_vertex, refined_face, electrode_positions_on_refined_mesh_all)
 
 #%%
 print('done')
