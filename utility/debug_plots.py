@@ -325,7 +325,9 @@ def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activatio
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def activation_template_correlation():
+def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, surface_signal_smooth, surface_signal_sum):
+    n_samples, n_channels = qrs_subtracted.shape
+
     sample_axis = np.arange(n_samples)
     trace_range = max(
         np.nanmean(np.ptp(egm_unipolar, axis=0)),
@@ -381,7 +383,7 @@ def activation_template_correlation():
     template_axis.set_title('Activation template')
     subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
     original_axis.set_xlabel('time (ms)')
-    template_axis.set_xlabel('lag (samples)')
+    template_axis.set_xlabel('time (ms)')
     subtracted_axis.set_xlabel('time (ms)')
     original_axis.set_yticks([])
     template_axis.set_yticks([])
@@ -391,7 +393,7 @@ def activation_template_correlation():
     subtracted_axis.set_xlim(sample_axis[0], sample_axis[-1])
 
     # set the y-axis limits
-    top_unipolar_egm = egm_unipolar_filtered[:, -1] + trace_offsets[-1]
+    top_unipolar_egm = egm_unipolar[:, -1] + trace_offsets[-1]
     y_min = np.nanmin(surface_signal_scaled)
     y_max = np.nanmax(top_unipolar_egm)
     original_axis.set_ylim(y_min, y_max)
@@ -400,6 +402,6 @@ def activation_template_correlation():
 
     fig.tight_layout()
 
-    fig_path = directory['result'] / f'7_activation_refined_{n}.png'
+    fig_path = result_folder / f'7_activation_refined_{n}.png'
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()

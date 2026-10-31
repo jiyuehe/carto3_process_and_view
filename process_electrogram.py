@@ -400,7 +400,8 @@ for map_id in [0]: #range(0,len(patients)):
             # plot the original electrograms, activation template, and refined activation times
             debug_plot = 0
             if debug_plot: 
-                utility.debug_plots.activation_template_correlation()
+                result_folder = directory['result']
+                utility.debug_plots.activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, surface_signal_smooth, surface_signal_sum)
 #%%
         # find out the cycle length of all the unipolar electrograms across all recording segments
         all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
