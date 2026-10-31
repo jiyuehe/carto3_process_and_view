@@ -54,6 +54,7 @@ for map_id in [0]: #range(0,len(patients)):
         print(f'process {name_prefix}')
 
         # load electrogram recording data
+        # ------------------------------------------------------------
         data = np.load(directory['data'] / f'{name_prefix}{suffix}', allow_pickle=True)
         catheter = {k: data[k] for k in data.files}
 
@@ -90,6 +91,7 @@ for map_id in [0]: #range(0,len(patients)):
             utility.debug_plots.mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unipolar, mapping_electrogram_unipolar, surface_name, surface_electrogram)
 
         # loop through each recording segment
+        # ------------------------------------------------------------
         mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
         surface_electrogram = catheter['surface_electrogram']
         n_segment = len(catheter['mapping_electrogram_unipolar']) # number of recording segments
@@ -402,8 +404,9 @@ for map_id in [0]: #range(0,len(patients)):
             if debug_plot: 
                 result_folder = directory['result']
                 utility.debug_plots.activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, surface_signal_smooth, surface_signal_sum)
-#%%
+
         # find out the cycle length of all the unipolar electrograms across all recording segments
+        # ------------------------------------------------------------
         all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
         all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
         median_cycle_length = np.median(all_cycle_lengths)
@@ -417,8 +420,8 @@ for map_id in [0]: #range(0,len(patients)):
 
         print(f'    median cycle length across all segments: {median_cycle_length} ms')
 
-        #%%
         # grab activations within window of interest
+        # ------------------------------------------------------------
         half_window_size_of_woi = 400//2
         t_start = 2000-200 - half_window_size_of_woi # window of interest start time index
         t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
@@ -430,8 +433,8 @@ for map_id in [0]: #range(0,len(patients)):
             activation_array[segment_id] = segment_activations
         catheter_processed['mapping_electrogram_unipolar_activation'] = activation_array
 
-        #%%
         # project electrode positions onto the mesh surface
+        # ------------------------------------------------------------
         mesh = catheter['mesh'].item()
 
         original_vertex = mesh['geometry_original_vertex']
