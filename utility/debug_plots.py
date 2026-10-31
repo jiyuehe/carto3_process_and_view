@@ -108,3 +108,101 @@ def QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surf
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
+def unipolar_electrogram_before_and_after_filtering(n, result_folder, egm_unipolar, egm_unipolar_filtered, mapping_name_unipolar):
+    n_channels = egm_unipolar.shape[1]
+    time_ms = np.arange(egm_unipolar.shape[0])
+    channel_magnitude = np.maximum(
+        np.ptp(egm_unipolar, axis=0),
+        np.ptp(egm_unipolar_filtered, axis=0),
+    )
+    trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
+    trace_offsets = np.arange(n_channels) * trace_spacing
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 10), sharex=True, sharey=True)
+    for axis, electrograms, title in zip(
+        axes,
+        (egm_unipolar, egm_unipolar_filtered),
+        ('Before filtering', 'After filtering'),
+    ):
+        axis.plot(time_ms, electrograms + trace_offsets, linewidth=1,color='blue')
+        axis.set_title(title)
+        axis.set_yticks(trace_offsets)
+        axis.set_yticklabels(mapping_name_unipolar[n], fontsize=8)
+        axis.grid(False)
+
+    axes[0].set_xlabel('Time (ms)')
+    axes[1].set_xlabel('Time (ms)')
+    fig.suptitle(f'Unipolar electrogram (segment id {n})')
+    fig.tight_layout()
+
+    # save the figure
+    fig_path = result_folder / f'3_unipolar_bandpass_filter_{n}.png'
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+
+def unipolar_QRS_template_QRS_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted):
+    n_channels = egm_unipolar_filtered.shape[1]
+    template_x = np.arange(-qrs_half_window, qrs_half_window + 1) # x-axis for the QRS template
+
+    fig = plt.figure(figsize=(20, 15))
+    gs = fig.add_gridspec(1, 3, width_ratios=[20, 1, 20], wspace=0.08)
+    ax_left = fig.add_subplot(gs[0, 0])
+    ax_mid = fig.add_subplot(gs[0, 1])
+    ax_right = fig.add_subplot(gs[0, 2])
+
+    channel_magnitude = np.maximum(
+        np.ptp(egm_unipolar, axis=0),
+        np.ptp(egm_unipolar_filtered, axis=0),
+    )
+
+    y_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
+    y_offset = np.arange(n_channels) * y_spacing
+
+    if len(qrs_peak_indices) > 0:
+        for peak_idx in qrs_peak_indices:
+            ax_left.axvline(peak_idx, color='red', linewidth=1.0, clip_on=True) # the vertical line indicating QRS timing
+
+    for channel_idx in range(n_channels):
+        signal_trace = egm_unipolar_filtered[:, channel_idx] + y_offset[channel_idx]
+        ax_left.plot(signal_trace, color='blue', linewidth=1.0)
+
+    for channel_idx in range(qrs_template_unipolar.shape[0]):
+        template = qrs_template_unipolar[channel_idx, :]
+        ax_mid.plot(template_x, template + channel_idx * y_spacing, color='blue', linewidth=1.2)
+
+    if len(qrs_peak_indices) > 0:
+        for peak_idx in qrs_peak_indices:
+            ax_right.axvline(peak_idx, color='red', linewidth=1.0, clip_on=True) # the vertical line indicating QRS timing
+
+    for channel_idx in range(qrs_subtracted.shape[1]):
+        signal_trace = qrs_subtracted[:, channel_idx] + y_offset[channel_idx]
+        ax_right.plot(signal_trace, color='blue', linewidth=1.0)
+
+    # find out the global min and max across all three subplots to set a shared y-axis range
+    stacked_trace_values = []
+    for channel_idx in range(n_channels):
+        stacked_trace_values.append(egm_unipolar_filtered[:, channel_idx] + y_offset[channel_idx])
+        stacked_trace_values.append(qrs_subtracted[:, channel_idx] + y_offset[channel_idx])
+        stacked_trace_values.append(qrs_template_unipolar[channel_idx, :] + channel_idx * y_spacing)
+    all_min = min(np.min(v) for v in stacked_trace_values)
+    all_max = max(np.max(v) for v in stacked_trace_values)
+    shared_y_margin = 1.0
+    for ax in [ax_left, ax_mid, ax_right]:
+        ax.set_ylim(all_min - shared_y_margin, all_max + shared_y_margin)
+
+    ax_left.set_title('Original EGMs')
+    ax_left.set_yticks([])
+    ax_mid.set_title('QRS templates')
+    ax_mid.set_yticks([])
+    ax_right.set_title('QRS-subtracted EGMs')
+    ax_right.set_yticks([])
+
+    for ax in [ax_left, ax_mid, ax_right]:
+        ax.grid(False)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    fig_path = result_folder / f'4_qrs_subtraction_{n}.png'
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+

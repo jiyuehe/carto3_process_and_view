@@ -108,13 +108,7 @@ for map_id in [0]: #range(0,len(patients)):
 
             sampling_rate_hz = 1000
             surface_bandpass_hz = (10, 400)
-            surface_filter = butter(
-                4,
-                surface_bandpass_hz,
-                btype='bandpass',
-                fs=sampling_rate_hz,
-                output='sos',
-            )
+            surface_filter = butter(4, surface_bandpass_hz, btype='bandpass', fs=sampling_rate_hz, output='sos')
             egm_surface_filtered = sosfiltfilt(surface_filter, egm_surface, axis=0)
             
             surface_signal = np.abs(egm_surface_filtered) # take abs first so positive and negative deflections do not cancel each other
@@ -139,18 +133,12 @@ for map_id in [0]: #range(0,len(patients)):
                 result_folder = directory['result']
                 surface_name = catheter['surface_name']
                 utility.debug_plots.QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
-#%%
+
             # bandpass filter the unipolar electrogram
             # ------------------------------
             egm_unipolar = np.asarray(mapping_electrogram_unipolar[n], dtype=float)
-            unipolar_bandpass_hz = (20, 80)
-            unipolar_filter = butter(
-                4,
-                unipolar_bandpass_hz,
-                btype='bandpass',
-                fs=sampling_rate_hz,
-                output='sos',
-            )
+            unipolar_bandpass_hz = (10, 400)
+            unipolar_filter = butter(4, unipolar_bandpass_hz, btype='bandpass', fs=sampling_rate_hz, output='sos')
             egm_unipolar_filtered = sosfiltfilt(unipolar_filter, egm_unipolar, axis=0)
 
             # smooth the electrogram
@@ -163,37 +151,12 @@ for map_id in [0]: #range(0,len(patients)):
 
                 egm_unipolar_filtered[:, channel_idx] = electrogram
 
+            # unipolar electrograms before and after filtering
             debug_plot = 0
-            if debug_plot: # compare unipolar electrograms before and after filtering
-                n_channels = egm_unipolar.shape[1]
-                time_ms = np.arange(egm_unipolar.shape[0]) / sampling_rate_hz * 1000
-                channel_magnitude = np.maximum(
-                    np.ptp(egm_unipolar, axis=0),
-                    np.ptp(egm_unipolar_filtered, axis=0),
-                )
-                trace_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
-                trace_offsets = np.arange(n_channels) * trace_spacing
-
-                fig, axes = plt.subplots(1, 2, figsize=(12, 10), sharex=True, sharey=True)
-                for axis, electrograms, title in zip(
-                    axes,
-                    (egm_unipolar, egm_unipolar_filtered),
-                    ('Before filtering', 'After filtering'),
-                ):
-                    axis.plot(time_ms, electrograms + trace_offsets, linewidth=1,color='blue')
-                    axis.set_title(title)
-                    axis.set_yticks(trace_offsets)
-                    axis.set_yticklabels(mapping_name_unipolar, fontsize=8)
-                    axis.grid(False)
-
-                axes[-1].set_xlabel('Time (ms)')
-                fig.suptitle(f'Unipolar electrogram (segment id {n} of [0, {n_segment-1}])')
-                fig.tight_layout()
-
-                # save the figure
-                fig_path = directory['result'] / f'bandpass_filter_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close(fig)
+            if debug_plot: 
+                result_folder = directory['result']
+                mapping_name_unipolar = catheter['mapping_name_unipolar']
+                utility.debug_plots.unipolar_electrogram_before_and_after_filtering(n, result_folder, egm_unipolar, egm_unipolar_filtered, mapping_name_unipolar)
 
             # create QRS morphology template for each of the unipolar electrograms
             # ------------------------------
@@ -251,73 +214,12 @@ for map_id in [0]: #range(0,len(patients)):
 
             mapping_electrogram_unipolar_qrs_subtracted[n] = qrs_subtracted
 
+            # plot the original, QRS template, and QRS-subtracted electrograms
             debug_plot = 0
-            if debug_plot: # plot the original, QRS template, and QRS-subtracted electrograms
-                n_channels = egm_unipolar_filtered.shape[1]
-                template_x = np.arange(-qrs_half_window, qrs_half_window + 1) # x-axis for the QRS template
+            if debug_plot: 
+                result_folder = directory['result']
+                utility.debug_plots.unipolar_QRS_template_QRS_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted)
 
-                fig = plt.figure(figsize=(20, 15))
-                gs = fig.add_gridspec(1, 3, width_ratios=[20, 1, 20], wspace=0.08)
-                ax_left = fig.add_subplot(gs[0, 0])
-                ax_mid = fig.add_subplot(gs[0, 1])
-                ax_right = fig.add_subplot(gs[0, 2])
-
-                channel_magnitude = np.maximum(
-                    np.ptp(egm_unipolar, axis=0),
-                    np.ptp(egm_unipolar_filtered, axis=0),
-                )
-
-                y_spacing = max(1.0, np.nanmean(channel_magnitude) * 1.05)
-                y_offset = np.arange(n_channels) * y_spacing
-
-                if len(qrs_peak_indices) > 0:
-                    for peak_idx in qrs_peak_indices:
-                        ax_left.axvline(peak_idx, color='red', linewidth=1.0, clip_on=True) # the vertical line indicating QRS timing
-
-                for channel_idx in range(n_channels):
-                    signal_trace = egm_unipolar_filtered[:, channel_idx] + y_offset[channel_idx]
-                    ax_left.plot(signal_trace, color='blue', linewidth=1.0)
-
-                for channel_idx in range(qrs_template_unipolar.shape[0]):
-                    template = qrs_template_unipolar[channel_idx, :]
-                    ax_mid.plot(template_x, template + channel_idx * y_spacing, color='blue', linewidth=1.2)
-
-                if len(qrs_peak_indices) > 0:
-                    for peak_idx in qrs_peak_indices:
-                        ax_right.axvline(peak_idx, color='red', linewidth=1.0, clip_on=True) # the vertical line indicating QRS timing
-
-                for channel_idx in range(qrs_subtracted.shape[1]):
-                    signal_trace = qrs_subtracted[:, channel_idx] + y_offset[channel_idx]
-                    ax_right.plot(signal_trace, color='blue', linewidth=1.0)
-
-                # find out the global min and max across all three subplots to set a shared y-axis range
-                stacked_trace_values = []
-                for channel_idx in range(n_channels):
-                    stacked_trace_values.append(egm_unipolar_filtered[:, channel_idx] + y_offset[channel_idx])
-                    stacked_trace_values.append(qrs_subtracted[:, channel_idx] + y_offset[channel_idx])
-                    stacked_trace_values.append(qrs_template_unipolar[channel_idx, :] + channel_idx * y_spacing)
-                all_min = min(np.min(v) for v in stacked_trace_values)
-                all_max = max(np.max(v) for v in stacked_trace_values)
-                shared_y_margin = 1.0
-                for ax in [ax_left, ax_mid, ax_right]:
-                    ax.set_ylim(all_min - shared_y_margin, all_max + shared_y_margin)
-
-                ax_left.set_title('Original EGMs')
-                ax_left.set_yticks([])
-                ax_mid.set_title('QRS templates')
-                ax_mid.set_yticks([])
-                ax_right.set_title('QRS-subtracted EGMs')
-                ax_right.set_yticks([])
-
-                for ax in [ax_left, ax_mid, ax_right]:
-                    ax.grid(False)
-                    for spine in ax.spines.values():
-                        spine.set_visible(False)
-
-                fig_path = directory['result'] / f'qrs_subtraction_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close()
-    #%%
             # activation time detection on the QRS-subtracted unipolar electrograms
             # ------------------------------
             # for each qrs subtracted unipolar electrogram, do auto correlation to find out its cycle length
@@ -354,8 +256,9 @@ for map_id in [0]: #range(0,len(patients)):
                         autocorrelation[:150] = 0
                         candidate_lags, properties = find_peaks(autocorrelation,distance=150)
 
+                        # plot the autocorrelation of this channel
                         debug_plot = 0
-                        if debug_plot: # plot the autocorrelation for this channel
+                        if debug_plot: 
                             time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
                             fig, (electrogram_axis, autocorrelation_axis) = plt.subplots(2,1,figsize=(8, 8))
                             electrogram_axis.plot(time_ms, electrogram, color='blue', linewidth=1.0)
@@ -388,7 +291,7 @@ for map_id in [0]: #range(0,len(patients)):
             cycle_lengths_per_segment[n] = cycle_length_unipolar
             cl = cycle_length_unipolar[np.isfinite(cycle_length_unipolar)] # remove NaN values
             cycle_length_this_segment = np.median(cl) if len(cl) > 0 else np.nan
-
+#%%
             debug_plot = 0
             if debug_plot: # plot the QRS-subtracted unipolar electrograms and their autocorrelations
                 time_ms = np.arange(n_samples) / sampling_rate_hz * 1000
