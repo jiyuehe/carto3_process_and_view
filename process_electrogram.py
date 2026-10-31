@@ -132,7 +132,7 @@ for map_id in [0]: #range(0,len(patients)):
             if debug_plot: 
                 result_folder = directory['result']
                 surface_name = catheter['surface_name']
-                utility.debug_plots.QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
+                utility.debug_plots.qrs_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices)
 
             # bandpass filter the unipolar electrogram
             # ------------------------------
@@ -218,7 +218,7 @@ for map_id in [0]: #range(0,len(patients)):
             debug_plot = 0
             if debug_plot: 
                 result_folder = directory['result']
-                utility.debug_plots.unipolar_QRS_template_QRS_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted)
+                utility.debug_plots.unipolar_qrs_template_qrs_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted)
 
             # activation time detection on the QRS-subtracted unipolar electrograms
             # ------------------------------
@@ -267,60 +267,13 @@ for map_id in [0]: #range(0,len(patients)):
             cycle_lengths_per_segment[n] = cycle_length_unipolar
             cl = cycle_length_unipolar[np.isfinite(cycle_length_unipolar)] # remove NaN values
             cycle_length_this_segment = np.median(cl) if len(cl) > 0 else np.nan
-#%%
+
             # plot the QRS-subtracted unipolar electrograms and their autocorrelations
             debug_plot = 0
             if debug_plot: 
-                time_ms = np.arange(n_samples)
-                signal_magnitude = np.ptp(qrs_subtracted, axis=0)
-                trace_spacing = max(1.0, np.nanmean(signal_magnitude) * 1.05)
-                trace_offsets = np.arange(n_channels) * trace_spacing
-                autocorrelation_scale = trace_spacing
-
-                fig, axes = plt.subplots(1, 2, figsize=(12, 10), sharex=True, sharey=True)
-                axes[0].plot(
-                    time_ms,
-                    qrs_subtracted + trace_offsets,
-                    linewidth=1,
-                    color='blue',
-                )
-                axes[0].set_title('QRS-subtracted unipolar electrograms')
-
-                autocorrelation_traces = np.column_stack(autocorrelations)
-                axes[1].plot(
-                    time_ms,
-                    autocorrelation_traces * autocorrelation_scale + trace_offsets,
-                    linewidth=1,
-                    color='blue',
-                )
-                for channel_idx in range(n_channels):
-                    if np.isfinite(cycle_length_unipolar[channel_idx]):
-                        cl = int(cycle_length_unipolar[channel_idx])
-                        axes[1].scatter(
-                            time_ms[cl],
-                            autocorrelations[channel_idx][cl] * autocorrelation_scale
-                            + trace_offsets[channel_idx],
-                            color='red',
-                            s=16,
-                            zorder=3,
-                        )
-                axes[1].set_title('Autocorrelations')
-
-                for axis in axes:
-                    axis.set_yticks(trace_offsets)
-                    axis.set_yticklabels(mapping_name_unipolar[n], fontsize=8)
-                    axis.grid(False)
-
-                axes[0].set_xlabel('Time (ms)')
-                axes[1].set_xlabel('Lag (ms)')
-                fig.suptitle(f'find out cycle length via autocorrelation (segment id {n})')
-                fig.tight_layout()
-
-                # save the figure
-                fig_path = directory['result'] / f'5_autocorrelation_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close(fig)
-
+                result_folder = directory['result']
+                utility.debug_plots.qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrelations, cycle_length_unipolar, mapping_name_unipolar)
+#%%
             # for each qrs subtracted unipolar electrogram, find out the activation time by finding the peak of the maximum negative slope (dv/dt)
             if not np.isnan(cycle_length_this_segment):
                 minimum_activation_distance = int(np.floor(0.8 * cycle_length_this_segment))

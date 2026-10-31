@@ -72,7 +72,7 @@ def mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unip
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def QRS_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices):
+def qrs_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surface, egm_surface_filtered, surface_signal_sum, surface_signal_smooth, qrs_peak_indices):
     fig, ax = plt.subplots(figsize=(8, 8))
     n_channel = egm_surface.shape[1]
 
@@ -140,7 +140,7 @@ def unipolar_electrogram_before_and_after_filtering(n, result_folder, egm_unipol
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def unipolar_QRS_template_QRS_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted):
+def unipolar_qrs_template_qrs_subtracted(n, result_folder, egm_unipolar, egm_unipolar_filtered, qrs_half_window, qrs_peak_indices, qrs_template_unipolar, qrs_subtracted):
     n_channels = egm_unipolar_filtered.shape[1]
     template_x = np.arange(-qrs_half_window, qrs_half_window + 1) # x-axis for the QRS template
 
@@ -205,4 +205,58 @@ def unipolar_QRS_template_QRS_subtracted(n, result_folder, egm_unipolar, egm_uni
     fig_path = result_folder / f'4_qrs_subtraction_{n}.png'
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
+
+def qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrelations, cycle_length_unipolar, mapping_name_unipolar):
+    n_samples, n_channels = qrs_subtracted.shape
+
+    time_ms = np.arange(n_samples)
+    signal_magnitude = np.ptp(qrs_subtracted, axis=0)
+    trace_spacing = max(1.0, np.nanmean(signal_magnitude) * 1.05)
+    trace_offsets = np.arange(n_channels) * trace_spacing
+    autocorrelation_scale = trace_spacing
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 10))
+    axes[0].plot(
+        time_ms,
+        qrs_subtracted + trace_offsets,
+        linewidth=1,
+        color='blue',
+    )
+    axes[0].set_title('QRS-subtracted unipolar electrograms')
+
+    autocorrelation_traces = np.column_stack(autocorrelations)
+    axes[1].plot(
+        time_ms,
+        autocorrelation_traces * autocorrelation_scale + trace_offsets,
+        linewidth=1,
+        color='blue',
+    )
+    for channel_idx in range(n_channels):
+        if np.isfinite(cycle_length_unipolar[channel_idx]):
+            cl = int(cycle_length_unipolar[channel_idx])
+            axes[1].scatter(
+                time_ms[cl],
+                autocorrelations[channel_idx][cl] * autocorrelation_scale
+                + trace_offsets[channel_idx],
+                color='red',
+                s=16,
+                zorder=3,
+            )
+    axes[1].set_title('Autocorrelations')
+
+    for axis in axes:
+        axis.set_yticks(trace_offsets)
+        axis.set_yticklabels(mapping_name_unipolar[n], fontsize=8)
+        axis.grid(False)
+        axis.autoscale(tight=True)
+
+    axes[0].set_xlabel('Time (ms)')
+    axes[1].set_xlabel('Lag (ms)')
+    fig.suptitle(f'find out cycle length via autocorrelation (segment id {n})')
+    fig.tight_layout()
+
+    # save the figure
+    fig_path = result_folder / f'5_autocorrelation_{n}.png'
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
 
