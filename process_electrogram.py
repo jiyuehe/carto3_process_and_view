@@ -273,10 +273,10 @@ for map_id in [0]: #range(0,len(patients)):
             if debug_plot: 
                 result_folder = directory['result']
                 utility.debug_plots.qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrelations, cycle_length_unipolar, mapping_name_unipolar)
-#%%
+
             # for each qrs subtracted unipolar electrogram, find out the activation time by finding the peak of the maximum negative slope (dv/dt)
             if not np.isnan(cycle_length_this_segment):
-                minimum_activation_distance = int(np.floor(0.8 * cycle_length_this_segment))
+                minimum_activation_distance = int(np.floor(0.9 * cycle_length_this_segment))
             elif np.isnan(cycle_length_this_segment):
                 minimum_activation_distance = 150
 
@@ -287,7 +287,7 @@ for map_id in [0]: #range(0,len(patients)):
 
                 if np.ptp(electrogram) >= 0.5: # mV
                     # find peaks on the electrogram
-                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.08*np.ptp(electrogram))
+                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.08*np.ptp(negative_dvdt))
 
                     # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
                     peak_values = peak_properties['peak_heights']
@@ -323,205 +323,85 @@ for map_id in [0]: #range(0,len(patients)):
             # plot the before and after QRS-subtracted unipolar electrograms and the detected activation times
             debug_plot = 0
             if debug_plot: 
-                sample_axis = np.arange(n_samples)
-                trace_range = max(
-                    np.nanmean(np.ptp(egm_unipolar, axis=0)),
-                    np.nanmean(np.ptp(qrs_subtracted, axis=0)),
-                )
-                trace_spacing = max(1.0, trace_range * 1.05)
-                trace_offsets = np.arange(n_channels) * trace_spacing
-
-                surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
-
-                fig, axes = plt.subplots(1, 2, figsize=(10, 8), sharex=True)
-                original_axis, subtracted_axis = axes
-
-                for channel_idx in range(n_channels):
-                    offset = trace_offsets[channel_idx]
-                    original_axis.plot(
-                        sample_axis,
-                        egm_unipolar[:, channel_idx] + offset,
-                        color='blue',
-                        linewidth=0.7,
-                    )
-                    subtracted_axis.plot(
-                        sample_axis,
-                        qrs_subtracted[:, channel_idx] + offset,
-                        color='blue',
-                        linewidth=0.7,
-                    )
-                    activation_peaks = activation_times_unipolar[channel_idx]
-                    subtracted_axis.scatter(
-                        activation_peaks,
-                        qrs_subtracted[activation_peaks, channel_idx] + offset,
-                        color='red',
-                        s=12,
-                        zorder=3,
-                    )
-
-                surface_axis = np.arange(surface_signal_sum.shape[0])
-                original_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
-                subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
-
-                original_axis.set_title('Original unipolar electrograms')
-                subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
-                original_axis.set_xlabel('time (ms)')
-                subtracted_axis.set_xlabel('time (ms)')
-                original_axis.set_yticks([])
-                subtracted_axis.set_yticks([])
-                original_axis.set_xlim(sample_axis[0], sample_axis[-1])
-
-                # set the y-axis limits
-                top_unipolar_egm = egm_unipolar_filtered[:, -1] + trace_offsets[-1]
-                y_min = np.nanmin(surface_signal_scaled)
-                y_max = np.nanmax(top_unipolar_egm)
-                original_axis.set_ylim(y_min, y_max)
-                subtracted_axis.set_ylim(y_min, y_max)
-
-                fig.tight_layout()
-
-                # save the figure
-                fig_path = directory['result'] / f'6_activation_initial_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close(fig)
+                result_folder = directory['result']
+                utility.debug_plots.activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activation_times_unipolar, surface_signal_smooth)
 
             # refine activation time detections
             # ------------------------------
             no_activation_electrode = 0
             for i in range(0,len(activation_times_unipolar)):
-                if activation_times_unipolar[i].size == 0:
+                if len(activation_times_unipolar[i]) == 0:
                     no_activation_electrode = no_activation_electrode + 1
 
             if no_activation_electrode != len(activation_times_unipolar):
                 # adaptive activation template length based on the morphology of the unipolar electrograms
-                signal = egm_unipolar_filtered
+                signal = egm_unipolar_filtered # here use the egm with QRS
                 peak_indices = activation_times_unipolar
                 half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
                 template_len = 2 * half_window + 1
 
                 # for each unipolar electrogram, create morphology template from the detected activation times
+                signal = qrs_subtracted # here use the egm with removed QRS
                 activation_template_unipolar = utility.signal_processing.create_consistent_template(signal,peak_indices,half_window,consistency_threshold=0.4)
 
                 # for each unipolar electrogram channel, crosscorrelate the activation template with the QRS-subtracted unipolar electrogram to refine the activation time detections
-                activation_times_unipolar_refined = [np.array([0], dtype=int) for _ in range(n_channels)]
+                activation_times_unipolar_refined = [[] for _ in range(n_channels)]
                 for channel_idx in range(n_channels):
-                    electrogram = qrs_subtracted[:, channel_idx].astype(float)
-                    template = activation_template_unipolar[channel_idx, :].astype(float)
+                    electrogram = qrs_subtracted[:, channel_idx]
 
-                    template_centered = template - np.median(template)
-                    electrogram_centered = electrogram - np.median(electrogram)
+                    if np.ptp(electrogram) >= 0.5: # mV
+                        # find peaks on the electrogram
+                        peak_indices, peak_properties = find_peaks(electrogram, distance=minimum_activation_distance, height=0.08*np.ptp(electrogram))
 
-                    # normalize the cross-correlation to find the lag that best aligns the template with this channel
-                    cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
+                        # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
+                        peak_values = peak_properties['peak_heights']
+                        good_signal_flag = int(
+                            peak_values.size > 0
+                            and np.min(peak_values) >= 0.5 * np.max(peak_values)
+                        )
 
-                    # find out peak threshold
-                    correlation_baseline = np.median(cross_correlation)
-                    correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
-                    peak_height_threshold = max(
-                        correlation_baseline + 2 * correlation_noise,
-                        0.02 * np.max(cross_correlation),
-                    )
-                    peak_prominence_threshold = max(2 * correlation_noise, 0.0)
+                        if good_signal_flag == 1:
+                            template = activation_template_unipolar[channel_idx, :]
 
-                    correlation_peaks, _ = find_peaks(
-                        np.nan_to_num(cross_correlation, nan=-np.inf),
-                        distance=minimum_activation_distance,
-                        height=peak_height_threshold,
-                        prominence=peak_prominence_threshold,
-                    )
+                            template_centered = template - np.median(template)
+                            electrogram_centered = electrogram - np.median(electrogram)
 
-                    # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
-                    correlation_peaks = correlation_peaks[
-                        (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
-                    ]
+                            # normalize the cross-correlation to find the lag that best aligns the template with this channel
+                            cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
 
-                    if len(correlation_peaks) != 0:
-                        activation_times_unipolar_refined[channel_idx] = correlation_peaks
+                            # find out peak threshold
+                            correlation_baseline = np.median(cross_correlation)
+                            correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
+                            peak_height_threshold = max(
+                                correlation_baseline + 2 * correlation_noise,
+                                0.02 * np.max(cross_correlation),
+                            )
+                            peak_prominence_threshold = max(2 * correlation_noise, 0.0)
+
+                            correlation_peaks, _ = find_peaks(
+                                np.nan_to_num(cross_correlation, nan=-np.inf),
+                                distance=minimum_activation_distance,
+                                height=peak_height_threshold,
+                                prominence=peak_prominence_threshold,
+                            )
+
+                            # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
+                            correlation_peaks = correlation_peaks[
+                                (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
+                            ]
+
+                            if len(correlation_peaks) != 0:
+                                activation_times_unipolar_refined[channel_idx] = correlation_peaks
             elif no_activation_electrode == len(activation_times_unipolar):
                 activation_times_unipolar_refined = activation_times_unipolar
 
             mapping_electrogram_unipolar_activation[n] = activation_times_unipolar_refined
 
+            # plot the original electrograms, activation template, and refined activation times
             debug_plot = 0
-            if debug_plot: # plot the original electrograms, activation template, and refined activation times
-                sample_axis = np.arange(n_samples)
-                trace_range = max(
-                    np.nanmean(np.ptp(egm_unipolar, axis=0)),
-                    np.nanmean(np.ptp(qrs_subtracted, axis=0)),
-                )
-                trace_spacing = max(1.0, trace_range * 1.05)
-                trace_offsets = np.arange(n_channels) * trace_spacing
-
-                template_axis_offset = np.arange(n_channels) * trace_spacing
-                template_x = np.arange(-half_window, half_window + 1)
-                surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
-
-                fig, axes = plt.subplots(1, 3, figsize=(12, 8), gridspec_kw={'width_ratios': [30, 1, 30]})
-                original_axis, template_axis, subtracted_axis = axes
-
-                for channel_idx in range(n_channels):
-                    offset = trace_offsets[channel_idx]
-                    original_axis.plot(
-                        sample_axis,
-                        egm_unipolar[:, channel_idx] + offset,
-                        color='blue',
-                        linewidth=0.7,
-                    )
-                    subtracted_axis.plot(
-                        sample_axis,
-                        qrs_subtracted[:, channel_idx] + offset,
-                        color='blue',
-                        linewidth=0.7,
-                    )
-                    activation_peaks = activation_times_unipolar_refined[channel_idx]
-                    if not np.array_equal(activation_peaks, [0]):
-                        subtracted_axis.scatter(
-                            activation_peaks,
-                            qrs_subtracted[activation_peaks, channel_idx] + offset,
-                            color='red',
-                            s=12,
-                            zorder=3,
-                        )
-
-                    template = activation_template_unipolar[channel_idx, :]
-                    template_axis.plot(
-                        template_x,
-                        template + template_axis_offset[channel_idx],
-                        color='blue',
-                        linewidth=1.0,
-                    )
-
-                surface_axis = np.arange(surface_signal_sum.shape[0])
-                original_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
-                subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
-
-                original_axis.set_title('Original unipolar electrograms')
-                template_axis.set_title('Activation template')
-                subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
-                original_axis.set_xlabel('time (ms)')
-                template_axis.set_xlabel('lag (samples)')
-                subtracted_axis.set_xlabel('time (ms)')
-                original_axis.set_yticks([])
-                template_axis.set_yticks([])
-                subtracted_axis.set_yticks([])
-                original_axis.set_xlim(sample_axis[0], sample_axis[-1])
-                template_axis.set_xlim(template_x[0], template_x[-1])
-                subtracted_axis.set_xlim(sample_axis[0], sample_axis[-1])
-
-                # set the y-axis limits
-                top_unipolar_egm = egm_unipolar_filtered[:, -1] + trace_offsets[-1]
-                y_min = np.nanmin(surface_signal_scaled)
-                y_max = np.nanmax(top_unipolar_egm)
-                original_axis.set_ylim(y_min, y_max)
-                subtracted_axis.set_ylim(y_min, y_max)
-                template_axis.set_ylim(y_min, y_max)
-
-                fig.tight_layout()
-
-                fig_path = directory['result'] / f'activation_refined_{n}.png'
-                plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
-                plt.close()
-    #%%
+            if debug_plot: 
+                utility.debug_plots.activation_template_correlation()
+#%%
         # find out the cycle length of all the unipolar electrograms across all recording segments
         all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
         all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values

@@ -260,3 +260,146 @@ def qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrela
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
+def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activation_times_unipolar, surface_signal_smooth):
+    n_samples, n_channels = qrs_subtracted.shape
+
+    sample_axis = np.arange(n_samples)
+    trace_range = max(
+        np.nanmean(np.ptp(egm_unipolar, axis=0)),
+        np.nanmean(np.ptp(qrs_subtracted, axis=0)),
+    )
+    trace_spacing = max(1.0, trace_range * 1.05)
+    trace_offsets = np.arange(n_channels) * trace_spacing
+
+    surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 8), sharex=True)
+    original_axis, subtracted_axis = axes
+
+    for channel_idx in range(n_channels):
+        offset = trace_offsets[channel_idx]
+        original_axis.plot(
+            sample_axis,
+            egm_unipolar[:, channel_idx] + offset,
+            color='blue',
+            linewidth=0.7,
+        )
+        subtracted_axis.plot(
+            sample_axis,
+            qrs_subtracted[:, channel_idx] + offset,
+            color='blue',
+            linewidth=0.7,
+        )
+        activation_peaks = activation_times_unipolar[channel_idx]
+        subtracted_axis.scatter(
+            activation_peaks,
+            qrs_subtracted[activation_peaks, channel_idx] + offset,
+            color='red',
+            s=12,
+            zorder=3,
+        )
+
+    surface_axis = np.arange(n_samples)
+    original_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+    subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+
+    original_axis.set_title('Original unipolar electrograms')
+    subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
+    original_axis.set_xlabel('time (ms)')
+    subtracted_axis.set_xlabel('time (ms)')
+    original_axis.set_yticks([])
+    subtracted_axis.set_yticks([])
+    original_axis.set_xlim(sample_axis[0], sample_axis[-1])
+
+    # set the y-axis limits
+    top_unipolar_egm = qrs_subtracted[:, -1] + trace_offsets[-1]
+    y_min = np.nanmin(surface_signal_scaled)
+    y_max = np.nanmax(top_unipolar_egm)
+    original_axis.set_ylim(y_min, y_max)
+    subtracted_axis.set_ylim(y_min, y_max)
+
+    fig.tight_layout()
+
+    # save the figure
+    fig_path = result_folder / f'6_activation_initial_{n}.png'
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+
+def activation_template_correlation():
+    sample_axis = np.arange(n_samples)
+    trace_range = max(
+        np.nanmean(np.ptp(egm_unipolar, axis=0)),
+        np.nanmean(np.ptp(qrs_subtracted, axis=0)),
+    )
+    trace_spacing = max(1.0, trace_range * 1.05)
+    trace_offsets = np.arange(n_channels) * trace_spacing
+
+    template_axis_offset = np.arange(n_channels) * trace_spacing
+    template_x = np.arange(-half_window, half_window + 1)
+    surface_signal_scaled = surface_signal_smooth * (trace_range / np.ptp(surface_signal_smooth)) - trace_spacing
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 8), gridspec_kw={'width_ratios': [30, 1, 30]})
+    original_axis, template_axis, subtracted_axis = axes
+
+    for channel_idx in range(n_channels):
+        offset = trace_offsets[channel_idx]
+        original_axis.plot(
+            sample_axis,
+            egm_unipolar[:, channel_idx] + offset,
+            color='blue',
+            linewidth=0.7,
+        )
+        subtracted_axis.plot(
+            sample_axis,
+            qrs_subtracted[:, channel_idx] + offset,
+            color='blue',
+            linewidth=0.7,
+        )
+        activation_peaks = activation_times_unipolar_refined[channel_idx]
+        if not np.array_equal(activation_peaks, [0]):
+            subtracted_axis.scatter(
+                activation_peaks,
+                qrs_subtracted[activation_peaks, channel_idx] + offset,
+                color='red',
+                s=12,
+                zorder=3,
+            )
+
+        template = activation_template_unipolar[channel_idx, :]
+        template_axis.plot(
+            template_x,
+            template + template_axis_offset[channel_idx],
+            color='blue',
+            linewidth=1.0,
+        )
+
+    surface_axis = np.arange(surface_signal_sum.shape[0])
+    original_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+    subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
+
+    original_axis.set_title('Original unipolar electrograms')
+    template_axis.set_title('Activation template')
+    subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
+    original_axis.set_xlabel('time (ms)')
+    template_axis.set_xlabel('lag (samples)')
+    subtracted_axis.set_xlabel('time (ms)')
+    original_axis.set_yticks([])
+    template_axis.set_yticks([])
+    subtracted_axis.set_yticks([])
+    original_axis.set_xlim(sample_axis[0], sample_axis[-1])
+    template_axis.set_xlim(template_x[0], template_x[-1])
+    subtracted_axis.set_xlim(sample_axis[0], sample_axis[-1])
+
+    # set the y-axis limits
+    top_unipolar_egm = egm_unipolar_filtered[:, -1] + trace_offsets[-1]
+    y_min = np.nanmin(surface_signal_scaled)
+    y_max = np.nanmax(top_unipolar_egm)
+    original_axis.set_ylim(y_min, y_max)
+    subtracted_axis.set_ylim(y_min, y_max)
+    template_axis.set_ylim(y_min, y_max)
+
+    fig.tight_layout()
+
+    fig_path = directory['result'] / f'7_activation_refined_{n}.png'
+    plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
