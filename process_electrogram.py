@@ -227,7 +227,7 @@ for map_id in [0]: #range(0,len(patients)):
             cycle_length_unipolar = np.full(n_channels, np.nan, dtype=float)
             autocorrelations = [np.zeros(n_samples, dtype=float) for _ in range(n_channels)]
             for channel_idx in range(n_channels):
-                electrogram = qrs_subtracted[:, channel_idx].astype(float)
+                electrogram = qrs_subtracted[:, channel_idx]
 
                 if np.ptp(electrogram) >= 0.5: # mV
                     electrogram = electrogram - np.mean(electrogram)
@@ -278,38 +278,51 @@ for map_id in [0]: #range(0,len(patients)):
             if not np.isnan(cycle_length_this_segment):
                 minimum_activation_distance = int(np.floor(0.8 * cycle_length_this_segment))
             elif np.isnan(cycle_length_this_segment):
-                minimum_activation_distance = 50
+                minimum_activation_distance = 150
 
-            activation_times_unipolar = []
+            activation_times_unipolar = [[] for _ in range(n_channels)]
             for channel_idx in range(n_channels):
-                electrogram = qrs_subtracted[:, channel_idx].astype(float)
+                electrogram = qrs_subtracted[:, channel_idx]
                 negative_dvdt = -np.diff(electrogram, prepend=electrogram[0])
 
-                if np.any(np.isfinite(negative_dvdt)):
-                    finite_dvdt = negative_dvdt[np.isfinite(negative_dvdt)]
-                    dvdt_baseline = np.median(finite_dvdt)
-                    dvdt_noise = 1.4826 * np.median(np.abs(finite_dvdt - dvdt_baseline))
-                    peak_height_threshold = max(
-                        dvdt_baseline + 2 * dvdt_noise,
-                        0.02 * np.max(finite_dvdt),
+                if np.ptp(electrogram) >= 0.5: # mV
+                    # find peaks on the electrogram
+                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.08*np.ptp(electrogram))
+
+                    # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
+                    peak_values = peak_properties['peak_heights']
+                    good_signal_flag = int(
+                        peak_values.size > 0
+                        and np.min(peak_values) >= 0.5 * np.max(peak_values)
                     )
-                    peak_prominence_threshold = max(2 * dvdt_noise, 0.0)
-                    activation_peaks, _ = find_peaks(
-                        np.nan_to_num(negative_dvdt, nan=-np.inf),
-                        distance=minimum_activation_distance,
-                        height=peak_height_threshold,
-                        prominence=peak_prominence_threshold,
-                    )
-                else:
-                    activation_peaks = np.array([], dtype=int)
 
-                # remove activation peaks that are at the very beginning or very end of the signal, as they may be artifacts
-                activation_peaks = activation_peaks[(activation_peaks != 0) & (activation_peaks != qrs_subtracted.shape[0])]
+                    if good_signal_flag == 1:
+                        if np.any(np.isfinite(negative_dvdt)):
+                            finite_dvdt = negative_dvdt[np.isfinite(negative_dvdt)]
+                            dvdt_baseline = np.median(finite_dvdt)
+                            dvdt_noise = 1.4826 * np.median(np.abs(finite_dvdt - dvdt_baseline))
+                            peak_height_threshold = max(
+                                dvdt_baseline + 2 * dvdt_noise,
+                                0.02 * np.max(finite_dvdt),
+                            )
+                            peak_prominence_threshold = max(2 * dvdt_noise, 0.0)
+                            activation_peaks, _ = find_peaks(
+                                np.nan_to_num(negative_dvdt, nan=-np.inf),
+                                distance=minimum_activation_distance,
+                                height=peak_height_threshold,
+                                prominence=peak_prominence_threshold,
+                            )
+                        else:
+                            activation_peaks = []
 
-                activation_times_unipolar.append(activation_peaks)
+                        # remove activation peaks that are at the very beginning or very end of the signal, as they may be artifacts
+                        activation_peaks = activation_peaks[(activation_peaks != 0) & (activation_peaks != qrs_subtracted.shape[0])]
 
+                        activation_times_unipolar[channel_idx] = activation_peaks
+
+            # plot the before and after QRS-subtracted unipolar electrograms and the detected activation times
             debug_plot = 0
-            if debug_plot: # plot the before and after QRS-subtracted unipolar electrograms and the detected activation times
+            if debug_plot: 
                 sample_axis = np.arange(n_samples)
                 trace_range = max(
                     np.nanmean(np.ptp(egm_unipolar, axis=0)),
@@ -368,7 +381,7 @@ for map_id in [0]: #range(0,len(patients)):
                 fig.tight_layout()
 
                 # save the figure
-                fig_path = directory['result'] / f'activation_initial_{n}.png'
+                fig_path = directory['result'] / f'6_activation_initial_{n}.png'
                 plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
                 plt.close(fig)
 
@@ -601,8 +614,9 @@ for map_id in [0]: #range(0,len(patients)):
         file_path = directory['data'] / f'{name_prefix}_carto_catheter_processed.npz'
         np.savez(file_path, **catheter_processed)
 
+        # plot the electrode positions and the projections on the mesh surface
         debug_plot = 0
-        if debug_plot == 1: # plot the electrode positions and the projections on the mesh surface
+        if debug_plot == 1: 
             fig = go.Figure()
             fig.add_trace(go.Mesh3d(
                 x=original_vertex[:, 0], y=original_vertex[:, 1], z=original_vertex[:, 2],
