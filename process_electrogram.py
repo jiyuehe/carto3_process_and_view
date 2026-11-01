@@ -43,7 +43,7 @@ print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_lo
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in range(0,len(patients)):
+for map_id in range(253,len(patients)):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA':
@@ -407,64 +407,74 @@ for map_id in range(0,len(patients)):
 
         # find out the best window of interest
         # ------------------------------------------------------------
-        half_window_size_of_woi = median_cycle_length*1.5 // 2
+        half_window_size_of_woi = median_cycle_length * 1.5 // 2
 
         electrode_positions_all = np.concatenate([
             np.asarray(segment, dtype=float).reshape(-1, 3)
             for segment in catheter['mapping_position_unipolar']
         ])
+        electrode_positions_valid = np.all(np.isfinite(electrode_positions_all), axis=1)
 
         # grab activations within window of interest
-        t_range = range(2000-200, 2000+100)
-        outlier_metric = np.zeros((len(t_range),))
-        for i in range(len(t_range)):
-            t = t_range[i]
-            t_start = t - half_window_size_of_woi # window of interest start time index
-            t_end = t + half_window_size_of_woi # window of interest end time index
-            catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(catheter_processed,t_start,t_end)
+        t_range = range(2000 - 200, 2000 + 100)
+        outlier_metric = np.zeros((len(t_range),), dtype=float)
+        for i, t in enumerate(t_range):
+            t_start = t - half_window_size_of_woi  # window of interest start time index
+            t_end = t + half_window_size_of_woi  # window of interest end time index
+            catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
+                catheter_processed, t_start, t_end
+            )
 
             # Find activation times that disagree with nearby electrodes.
             activation_segments = catheter_processed['mapping_electrogram_unipolar_activation_within_woi']
             activation_times_all = np.concatenate([
-                np.asarray(segment, dtype=float).reshape(-1) for segment in activation_segments
+                np.asarray(segment, dtype=float).reshape(-1)
+                for segment in activation_segments
             ])
 
             if len(activation_times_all) != len(electrode_positions_all):
-                outlier_metric[i] = 1
-            elif len(activation_times_all) == len(electrode_positions_all):
-                valid = (
-                    np.isfinite(activation_times_all) & (activation_times_all > 0)
-                    & np.all(np.isfinite(electrode_positions_all), axis=1)
-                )
-                valid_indices = np.flatnonzero(valid)
-                valid_times = activation_times_all[valid_indices]
-                valid_positions = electrode_positions_all[valid_indices]
-                outlier_mask = np.zeros(len(activation_times_all), dtype=bool)
-                if len(valid_indices) >= 3:
-                    nearby_electrodes = cKDTree(valid_positions)
-                    for local_idx, position in enumerate(valid_positions):
-                        neighbor_ids = [
-                            idx for idx in nearby_electrodes.query_ball_point(position, r=10.0)
-                            if idx != local_idx
-                        ]
-                        if len(neighbor_ids) >= 2:
-                            neighbor_times = valid_times[neighbor_ids]
-                            local_median = np.median(neighbor_times)
-                            if (
-                                abs(valid_times[local_idx] - local_median) > 10
-                                and np.count_nonzero(abs(neighbor_times - local_median) <= 10) >= 2
-                            ):
-                                outlier_mask[valid_indices[local_idx]] = True
+                outlier_metric[i] = 1.0
+                continue
 
-                outliers_id = np.flatnonzero(outlier_mask)
+            valid = (
+                np.isfinite(activation_times_all)
+                & (activation_times_all > 0)
+                & electrode_positions_valid
+            )
+            valid_indices = np.flatnonzero(valid)
+            valid_times = activation_times_all[valid_indices]
+            valid_positions = electrode_positions_all[valid_indices]
 
-                outlier_metric[i] = len(valid_times) - len(outliers_id)
+            if len(valid_indices) < 3:
+                outlier_metric[i] = float(len(valid_indices))
+                continue
 
-        min_outlier_ratio_idx = np.argmax(outlier_metric)
+            nearby_electrodes = cKDTree(valid_positions)
+            outlier_mask = np.zeros(len(valid_indices), dtype=bool)
+            for local_idx, position in enumerate(valid_positions):
+                neighbor_ids = np.asarray(nearby_electrodes.query_ball_point(position, r=10.0))
+                neighbor_ids = neighbor_ids[neighbor_ids != local_idx]
 
-        t_start = t_range[min_outlier_ratio_idx] - half_window_size_of_woi # window of interest start time index
-        t_end = t_range[min_outlier_ratio_idx] + half_window_size_of_woi # window of interest end time index
-        catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(catheter_processed,t_start,t_end)
+                if len(neighbor_ids) < 2:
+                    continue
+
+                neighbor_times = valid_times[neighbor_ids]
+                local_median = np.median(neighbor_times)
+                if (
+                    abs(valid_times[local_idx] - local_median) > 10
+                    and np.count_nonzero(np.abs(neighbor_times - local_median) <= 10) >= 2
+                ):
+                    outlier_mask[local_idx] = True
+
+            outlier_metric[i] = len(valid_times) - np.count_nonzero(outlier_mask)
+
+        min_outlier_ratio_idx = int(np.argmax(outlier_metric))
+
+        t_start = t_range[min_outlier_ratio_idx] - half_window_size_of_woi  # window of interest start time index
+        t_end = t_range[min_outlier_ratio_idx] + half_window_size_of_woi  # window of interest end time index
+        catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
+            catheter_processed, t_start, t_end
+        )
 
         # # keep each segment's channel activations together even when channel counts differ.
         # activation_array = np.empty(n_segment, dtype=object) # to make npsavez 
