@@ -414,7 +414,7 @@ for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
         # find out the best window of interest
         # ------------------------------------------------------------
         if map_id in sinus_rhythm_map_ids:
-            half_window_size_of_woi = 300 // 2
+            half_window_size_of_woi = 400 // 2
         else:
             half_window_size_of_woi = median_cycle_length * 1.5 // 2
 
