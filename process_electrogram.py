@@ -41,9 +41,11 @@ for i in range(0,len(patients)):
 
 print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_loaded} maps.')
 
+sinus_rhythm_map_ids = [245]
+
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in range(0,len(patients)):
+for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA':
@@ -79,7 +81,7 @@ for map_id in range(0,len(patients)):
         # plot the mapping catheter and surface lead electrograms
         debug_plot = 0
         if debug_plot: 
-            segment_id = 10
+            segment_id = 0
             result_folder = directory['result']
             mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
             mapping_name_unipolar = catheter['mapping_name_unipolar']
@@ -222,6 +224,11 @@ for map_id in range(0,len(patients)):
             # activation time detection on the QRS-subtracted unipolar electrograms
             # ------------------------------
             # for each qrs subtracted unipolar electrogram, do auto correlation to find out its cycle length
+            if map_id in sinus_rhythm_map_ids:
+                minimum_allowable_cycle_length = 650
+            else:
+                minimum_allowable_cycle_length = 150
+
             n_samples, n_channels = qrs_subtracted.shape
             cycle_length_unipolar = np.full(n_channels, np.nan, dtype=float)
             autocorrelations = [np.zeros(n_samples, dtype=float) for _ in range(n_channels)]
@@ -232,7 +239,7 @@ for map_id in range(0,len(patients)):
                     electrogram = electrogram - np.mean(electrogram)
 
                     # find peaks on the electrogram
-                    peak_indices, peak_properties = find_peaks(electrogram, distance=200, height=0.08*np.ptp(electrogram))
+                    peak_indices, peak_properties = find_peaks(electrogram, distance=minimum_allowable_cycle_length, height=0.2*np.ptp(electrogram))
 
                     # check if the electrogram has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
                     peak_values = peak_properties['peak_heights']
@@ -242,18 +249,14 @@ for map_id in range(0,len(patients)):
                     )
 
                     if good_signal_flag == 1:
-                        # # clip the electrogram to within +/- mean(peak_values)
-                        # mean_peak_value = np.mean(peak_values)
-                        # electrogram = np.clip(electrogram, -mean_peak_value, mean_peak_value)
-
                         # find out the cycle length via autocorrelation
                         autocorrelation = np.correlate(electrogram, electrogram, mode='full')[n_samples - 1:]
                         autocorrelation /= autocorrelation[0]
                         autocorrelations[channel_idx] = autocorrelation
 
                         # blank out the first portion of the autocorrelation to avoid detecting the zero-lag peak and nearby peaks
-                        autocorrelation[:150] = 0
-                        candidate_lags, properties = find_peaks(autocorrelation,distance=150)
+                        autocorrelation[:minimum_allowable_cycle_length] = 0
+                        candidate_lags, properties = find_peaks(autocorrelation,distance=minimum_allowable_cycle_length)
 
                         if len(candidate_lags) > 0:
                             candidate_lags = candidate_lags[candidate_lags != 1]
@@ -277,7 +280,7 @@ for map_id in range(0,len(patients)):
             if not np.isnan(cycle_length_this_segment):
                 minimum_activation_distance = int(np.floor(0.9 * cycle_length_this_segment))
             elif np.isnan(cycle_length_this_segment):
-                minimum_activation_distance = 150
+                minimum_activation_distance = minimum_allowable_cycle_length
 
             activation_times_unipolar = [[] for _ in range(n_channels)]
             for channel_idx in range(n_channels):
@@ -286,7 +289,7 @@ for map_id in range(0,len(patients)):
 
                 if np.ptp(electrogram) >= 0.5: # mV
                     # find peaks on the electrogram
-                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.08*np.ptp(negative_dvdt))
+                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.2*np.ptp(negative_dvdt))
 
                     # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
                     peak_values = peak_properties['peak_heights']
@@ -404,7 +407,7 @@ for map_id in range(0,len(patients)):
         catheter_processed['cycle_length'] = median_cycle_length
 
         print(f'    median cycle length across all segments: {median_cycle_length} ms')
-
+#%%
         # find out the best window of interest
         # ------------------------------------------------------------
         half_window_size_of_woi = median_cycle_length * 1.5 // 2
@@ -416,9 +419,12 @@ for map_id in range(0,len(patients)):
         electrode_positions_valid = np.all(np.isfinite(electrode_positions_all), axis=1)
 
         # grab activations within window of interest
-        t_range = range(2000 - 200, 2000 + 100)
+        t_range = np.arange(1600, 2201, 10)
         outlier_metric = np.zeros((len(t_range),), dtype=float)
         for i, t in enumerate(t_range):
+            if i % (len(t_range)//4) == 0:
+                print(f'    find the best window of interest {i+1 / len(t_range) * 100:.2f}%')
+
             t_start = t - half_window_size_of_woi  # window of interest start time index
             t_end = t + half_window_size_of_woi  # window of interest end time index
             catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
@@ -472,15 +478,12 @@ for map_id in range(0,len(patients)):
 
         t_start = t_range[min_outlier_ratio_idx] - half_window_size_of_woi  # window of interest start time index
         t_end = t_range[min_outlier_ratio_idx] + half_window_size_of_woi  # window of interest end time index
+        if t_end > 2500:
+            t_end = 2500
+        
         catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
             catheter_processed, t_start, t_end
         )
-
-        # # keep each segment's channel activations together even when channel counts differ.
-        # activation_array = np.empty(n_segment, dtype=object) # to make npsavez 
-        # for segment_id, segment_activations in enumerate(catheter_processed['mapping_electrogram_unipolar_activation']):
-        #     activation_array[segment_id] = segment_activations
-        # catheter_processed['mapping_electrogram_unipolar_activation'] = activation_array
 
         # project electrode positions onto the mesh surface
         # ------------------------------------------------------------
