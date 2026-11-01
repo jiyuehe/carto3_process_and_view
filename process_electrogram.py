@@ -291,7 +291,7 @@ for map_id in [0]: #range(0,len(patients)):
                     peak_values = peak_properties['peak_heights']
                     good_signal_flag = int(
                         peak_values.size > 0
-                        and np.min(peak_values) >= 0.5 * np.max(peak_values)
+                        and np.min(peak_values) >= 0.2 * np.max(peak_values)
                     )
 
                     if good_signal_flag == 1:
@@ -347,49 +347,37 @@ for map_id in [0]: #range(0,len(patients)):
                 for channel_idx in range(n_channels):
                     electrogram = qrs_subtracted[:, channel_idx]
 
-                    if np.ptp(electrogram) >= 0.5: # mV
-                        # find peaks on the electrogram
-                        peak_indices, peak_properties = find_peaks(electrogram, distance=minimum_activation_distance, height=0.08*np.ptp(electrogram))
+                    template = activation_template_unipolar[channel_idx, :]
 
-                        # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
-                        peak_values = peak_properties['peak_heights']
-                        good_signal_flag = int(
-                            peak_values.size > 0
-                            and np.min(peak_values) >= 0.5 * np.max(peak_values)
-                        )
+                    template_centered = template - np.median(template)
+                    electrogram_centered = electrogram - np.median(electrogram)
 
-                        if good_signal_flag == 1:
-                            template = activation_template_unipolar[channel_idx, :]
+                    # normalize the cross-correlation to find the lag that best aligns the template with this channel
+                    cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
 
-                            template_centered = template - np.median(template)
-                            electrogram_centered = electrogram - np.median(electrogram)
+                    # find out peak threshold
+                    correlation_baseline = np.median(cross_correlation)
+                    correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
+                    peak_height_threshold = max(
+                        correlation_baseline + 2 * correlation_noise,
+                        0.02 * np.max(cross_correlation),
+                    )
+                    peak_prominence_threshold = max(2 * correlation_noise, 0.0)
 
-                            # normalize the cross-correlation to find the lag that best aligns the template with this channel
-                            cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
+                    correlation_peaks, _ = find_peaks(
+                        np.nan_to_num(cross_correlation, nan=-np.inf),
+                        distance=minimum_activation_distance,
+                        height=peak_height_threshold,
+                        prominence=peak_prominence_threshold,
+                    )
 
-                            # find out peak threshold
-                            correlation_baseline = np.median(cross_correlation)
-                            correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
-                            peak_height_threshold = max(
-                                correlation_baseline + 2 * correlation_noise,
-                                0.02 * np.max(cross_correlation),
-                            )
-                            peak_prominence_threshold = max(2 * correlation_noise, 0.0)
+                    # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
+                    correlation_peaks = correlation_peaks[
+                        (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
+                    ]
 
-                            correlation_peaks, _ = find_peaks(
-                                np.nan_to_num(cross_correlation, nan=-np.inf),
-                                distance=minimum_activation_distance,
-                                height=peak_height_threshold,
-                                prominence=peak_prominence_threshold,
-                            )
-
-                            # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
-                            correlation_peaks = correlation_peaks[
-                                (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
-                            ]
-
-                            if len(correlation_peaks) != 0:
-                                activation_times_unipolar_refined[channel_idx] = correlation_peaks
+                    if len(correlation_peaks) != 0:
+                        activation_times_unipolar_refined[channel_idx] = correlation_peaks
             elif no_activation_electrode == len(activation_times_unipolar):
                 activation_times_unipolar_refined = activation_times_unipolar
 
