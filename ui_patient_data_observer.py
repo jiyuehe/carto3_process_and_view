@@ -43,7 +43,6 @@ SMOOTHING_DIFFUSION_STEP = 0.5
 directory = configuration.directory_setup()
 save_lock = threading.RLock()
 
-
 def available_mesh_names():
     suffix = '_carto_catheter_processed.npz'
     names = []
