@@ -410,7 +410,7 @@ def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtract
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def electrode_position_and_projection(original_vertex, original_face, electrode_positions_all, electrode_positions_on_original_mesh_all, refined_vertex, refined_face, electrode_positions_on_refined_mesh_all):
+def electrode_position_and_projection(n, original_vertex, original_face, electrode_positions_all, electrode_positions_on_original_mesh_all, refined_vertex, refined_face, electrode_positions_on_refined_mesh_all):
     fig = go.Figure()
     fig.add_trace(go.Mesh3d(
         x=original_vertex[:, 0], y=original_vertex[:, 1], z=original_vertex[:, 2],

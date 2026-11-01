@@ -415,7 +415,7 @@ for map_id in [0]: #range(0,len(patients)):
         catheter_processed['cycle_length'] = median_cycle_length
 
         print(f'    median cycle length across all segments: {median_cycle_length} ms')
-#%%
+
         # grab activations within window of interest
         # ------------------------------------------------------------
         half_window_size_of_woi = 400//2
@@ -423,7 +423,7 @@ for map_id in [0]: #range(0,len(patients)):
         t_end = 2000-200 + half_window_size_of_woi # window of interest end time index
         catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(catheter_processed,t_start,t_end)
 
-        # Keep each segment's channel activations together even when channel counts differ.
+        # keep each segment's channel activations together even when channel counts differ.
         activation_array = np.empty(n_segment, dtype=object)
         for segment_id, segment_activations in enumerate(catheter_processed['mapping_electrogram_unipolar_activation']):
             activation_array[segment_id] = segment_activations
@@ -497,7 +497,7 @@ for map_id in [0]: #range(0,len(patients)):
         # plot the electrode positions and the projections on the mesh surface
         debug_plot = 0
         if debug_plot == 1: 
-            utility.debug_plots.electrode_position_and_projection(original_vertex, original_face, electrode_positions_all, electrode_positions_on_original_mesh_all, refined_vertex, refined_face, electrode_positions_on_refined_mesh_all)
+            utility.debug_plots.electrode_position_and_projection(n, original_vertex, original_face, electrode_positions_all, electrode_positions_on_original_mesh_all, refined_vertex, refined_face, electrode_positions_on_refined_mesh_all)
 
 #%%
 print('done')
