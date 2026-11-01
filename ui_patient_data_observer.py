@@ -32,7 +32,8 @@ import utility
 
 # Do not color mesh vertices farther than this geodesic (surface) distance from
 # an electrode with a valid activation, in mesh coordinate units.
-INTERPOLATION_MAX_SURFACE_DISTANCE = 10.0
+INTERPOLATION_MAX_SURFACE_DISTANCE = 20.0
+INTERPOLATION_MAX_EXTRAPOLATION_DISTANCE = 10.0
 SMOOTHING_SPATIAL_SIGMA = 2.5
 SMOOTHING_EFFECTIVE_RADIUS = 3.0 * SMOOTHING_SPATIAL_SIGMA
 SMOOTHING_HUBER_FACTOR = 1.5
@@ -322,6 +323,46 @@ def surface_coverage_mask(valid_samples, surface_data):
     return surface_distance <= INTERPOLATION_MAX_SURFACE_DISTANCE
 
 
+def extend_mesh_interpolation(
+    interpolated,
+    sample_points,
+    sample_values,
+    mesh_vertices,
+    valid_samples,
+    surface_data,
+):
+    """Fill just beyond the linear interpolation region using nearest samples."""
+    covered = surface_coverage_mask(valid_samples, surface_data)
+    finite = np.isfinite(interpolated)
+    if interpolated.ndim > 1:
+        finite = np.all(finite, axis=tuple(range(1, interpolated.ndim)))
+
+    hull_vertices = np.flatnonzero(finite & covered)
+    if len(hull_vertices):
+        surface_distance = dijkstra(
+            surface_data['graph'],
+            directed=False,
+            indices=hull_vertices,
+            limit=INTERPOLATION_MAX_EXTRAPOLATION_DISTANCE,
+            min_only=True,
+        )
+        extrapolate = (
+            ~finite
+            & covered
+            & (surface_distance <= INTERPOLATION_MAX_EXTRAPOLATION_DISTANCE)
+        )
+        if np.any(extrapolate):
+            interpolated[extrapolate] = griddata(
+                sample_points[valid_samples],
+                sample_values,
+                mesh_vertices[extrapolate],
+                method='nearest',
+            )
+
+    interpolated[~covered] = np.nan
+    return interpolated
+
+
 def diffuse_mesh_values(values, surface_data):
     """Apply approximate Gaussian heat diffusion to vertex channels."""
     transition = surface_data['smoothing_transition']
@@ -463,9 +504,14 @@ def interpolate_activation_to_mesh(
         mesh_vertices,
         method='linear',
     )
-    covered = surface_coverage_mask(valid, surface_data)
-    mesh_activation[~covered] = np.nan
-    return mesh_activation
+    return extend_mesh_interpolation(
+        mesh_activation,
+        sample_points,
+        smoothed_activation[valid],
+        mesh_vertices,
+        valid,
+        surface_data,
+    )
 
 
 def interpolate_activation_phase_to_mesh(
@@ -499,9 +545,14 @@ def interpolate_activation_phase_to_mesh(
     mesh_vectors = griddata(
         sample_points[valid], phase_vectors, mesh_vertices, method='linear'
     )
-    mesh_vectors[
-        ~surface_coverage_mask(valid, surface_data)
-    ] = np.nan
+    mesh_vectors = extend_mesh_interpolation(
+        mesh_vectors,
+        sample_points,
+        phase_vectors,
+        mesh_vertices,
+        valid,
+        surface_data,
+    )
 
     confidence = np.hypot(mesh_vectors[:, 0], mesh_vectors[:, 1])
     mesh_phase = np.mod(
