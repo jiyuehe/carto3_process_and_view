@@ -45,7 +45,7 @@ sinus_rhythm_map_ids = list(range(238,248))
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
+for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA':
