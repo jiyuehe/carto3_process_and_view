@@ -41,7 +41,7 @@ for i in range(0,len(patients)):
 
 print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_loaded} maps.')
 
-sinus_rhythm_map_ids = [245]
+sinus_rhythm_map_ids = list(range(238,248))
 
 #%%
 suffix = '_carto_catheter.npz'
@@ -167,7 +167,10 @@ for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
             # adaptive qrs template length based on the far-field morphology of the unipolar electrograms
             signal = egm_unipolar_filtered
             peak_indices = qrs_peak_indices_per_channel
-            qrs_half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
+            if map_id in sinus_rhythm_map_ids:
+                qrs_half_window = 250 // 2
+            else: 
+                qrs_half_window = utility.signal_processing.estimate_far_field_half_window(signal,peak_indices)
             template_len = 2 * qrs_half_window + 1
 
             # create a median template only when aligned beats have consistent morphology
@@ -407,10 +410,13 @@ for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
         catheter_processed['cycle_length'] = median_cycle_length
 
         print(f'    median cycle length across all segments: {median_cycle_length} ms')
-#%%
+
         # find out the best window of interest
         # ------------------------------------------------------------
-        half_window_size_of_woi = median_cycle_length * 1.5 // 2
+        if map_id in sinus_rhythm_map_ids:
+            half_window_size_of_woi = 300 // 2
+        else:
+            half_window_size_of_woi = median_cycle_length * 1.5 // 2
 
         electrode_positions_all = np.concatenate([
             np.asarray(segment, dtype=float).reshape(-1, 3)
@@ -480,6 +486,8 @@ for map_id in sinus_rhythm_map_ids:#range(0,len(patients)):
         t_end = t_range[min_outlier_ratio_idx] + half_window_size_of_woi  # window of interest end time index
         if t_end > 2500:
             t_end = 2500
+
+        print(f'    best window of interest: {t_start}, {t_end}')
         
         catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
             catheter_processed, t_start, t_end

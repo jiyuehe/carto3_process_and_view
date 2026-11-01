@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 # estimate a common template half-width from the far-field envelope
 def estimate_far_field_half_window(signal,peak_indices):
     minimum_half_window = 50
-    maximum_half_window = 120
+    maximum_half_window = 250//2
 
     if peak_indices is None:
         half_window = minimum_half_window
