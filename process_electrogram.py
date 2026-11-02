@@ -138,7 +138,7 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
             # bandpass filter the unipolar electrogram
             # ------------------------------
             egm_unipolar = np.asarray(mapping_electrogram_unipolar[n], dtype=float)
-            unipolar_bandpass_hz = (10, 400)
+            unipolar_bandpass_hz = (10, 450)
             unipolar_filter = butter(4, unipolar_bandpass_hz, btype='bandpass', fs=sampling_rate_hz, output='sos')
             egm_unipolar_filtered = sosfiltfilt(unipolar_filter, egm_unipolar, axis=0)
 
@@ -213,8 +213,16 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
                     # only subtract when needed
                     template_magnitude = np.ptp(template_segment)
                     signal_magnitude = np.ptp(signal_segment)
-                    if template_magnitude > 0.2 and signal_magnitude > 0.2:  # only subtract if both template and signal have significant magnitude
-                        qrs_subtracted[seg_start:seg_end, channel_idx] -= template_segment * subtraction_window # the subtraction is tapered to avoid abrupt changes by multiplying with a tapering window (subtraction_window)
+                    if template_magnitude > 0.1 and signal_magnitude > 0.1:  # only subtract if both template and signal have significant magnitude
+                        if map_id in sinus_rhythm_map_ids:
+                            # replace the QRS region with a linearly interpolated signal to avoid abrupt changes
+                            qrs_subtracted[seg_start:seg_end, channel_idx] = np.interp(
+                                np.arange(seg_start, seg_end),
+                                [seg_start, seg_end - 1],
+                                [qrs_subtracted[seg_start, channel_idx], qrs_subtracted[seg_end - 1, channel_idx]]
+                            )
+                        else:
+                            qrs_subtracted[seg_start:seg_end, channel_idx] -= template_segment * subtraction_window # the subtraction is tapered to avoid abrupt changes by multiplying with a tapering window (subtraction_window)
 
             mapping_electrogram_unipolar_qrs_subtracted[n] = qrs_subtracted
 
