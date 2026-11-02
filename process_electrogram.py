@@ -186,6 +186,15 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
             qrs_subtraction_window[:qrs_taper_size] = qrs_taper
             qrs_subtraction_window[-qrs_taper_size:] = qrs_taper[::-1]
 
+            qrs_suppression_window = np.zeros(template_len, dtype=float)
+            suppression_taper_size = int(round(0.1 * template_len))
+            if suppression_taper_size:
+                suppression_taper = 0.5 * (
+                    1 + np.cos(np.linspace(0, np.pi, suppression_taper_size))
+                )
+                qrs_suppression_window[:suppression_taper_size] = suppression_taper
+                qrs_suppression_window[-suppression_taper_size:] = suppression_taper[::-1]
+
             for channel_idx in range(egm_unipolar_filtered.shape[1]):
                 for peak_idx in qrs_peak_indices:
                     start = peak_idx - qrs_half_window
@@ -215,12 +224,12 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
                     signal_magnitude = np.ptp(signal_segment)
                     if template_magnitude > 0.1 and signal_magnitude > 0.1:  # only subtract if both template and signal have significant magnitude
                         if map_id in sinus_rhythm_map_ids:
-                            # replace the QRS region with a linearly interpolated signal to avoid abrupt changes
-                            qrs_subtracted[seg_start:seg_end, channel_idx] = np.interp(
-                                np.arange(seg_start, seg_end),
-                                [seg_start, seg_end - 1],
-                                [qrs_subtracted[seg_start, channel_idx], qrs_subtracted[seg_end - 1, channel_idx]]
-                            )
+                            # suppress the QRS with a flat-bottomed inverse Hann window
+                            window_start = seg_start - start
+                            suppression_window = qrs_suppression_window[
+                                window_start:window_start + signal_segment.shape[0]
+                            ]
+                            qrs_subtracted[seg_start:seg_end, channel_idx] *= suppression_window
                         else:
                             qrs_subtracted[seg_start:seg_end, channel_idx] -= template_segment * subtraction_window # the subtraction is tapered to avoid abrupt changes by multiplying with a tapering window (subtraction_window)
 
