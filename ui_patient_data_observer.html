@@ -75,8 +75,9 @@
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggleRefinedMesh" checked>
                         <span class="toggle-slider"></span>
-                        <span class="toggle-text" id="meshTypeLabel">Refined Mesh</span>
+                        <span class="toggle-text">Refined Mesh</span>
                     </label>
+                    <button type="button" id="btnRemoveSegment" class="remove-segment-button" disabled>Remove segment</button>
                 </div>
             </div>
         </div>
@@ -102,6 +103,7 @@
         function updateSaveButton() {
             const saveButton = document.getElementById('btnSave');
             const cleanUpButton = document.getElementById('btnCleanUp');
+            const removeSegmentButton = document.getElementById('btnRemoveSegment');
             const editCount = editedSegmentIds.size;
             const hasInvalidActivation = Boolean(
                 document.querySelector('.activation-input[aria-invalid="true"]')
@@ -111,6 +113,8 @@
                 || hasInvalidActivation || editCount === 0;
             cleanUpButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
                 || hasInvalidActivation;
+            removeSegmentButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
+                || hasInvalidActivation || getCurrentSegmentPositions().length === 0;
         }
 
         function setSavingState(saving) {
@@ -253,6 +257,40 @@
             setSliderEnabled(true);
             updateSaveButton();
             setSaveStatus(`Cleared ${outliers.length} outlier activation${outliers.length === 1 ? '' : 's'}; unsaved changes.`, 'pending');
+            render3DPlot(true);
+            renderElectrogram();
+            if (document.getElementById('toggleInterpolateMesh').checked) {
+                refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
+            }
+        });
+
+        document.getElementById('btnRemoveSegment').addEventListener('click', () => {
+            if (!appData || isSaving || isUpdatingWoi || isSwitchingMesh
+                    || document.querySelector('.activation-input[aria-invalid="true"]')) return;
+
+            const electrodeCount = getCurrentSegmentPositions().length;
+            if (electrodeCount === 0) {
+                setSaveStatus('The current segment has no electrodes.', 'error');
+                return;
+            }
+            if (!Array.isArray(appData.activation_uni)
+                    || !Array.isArray(appData.activation_uni[currentSegmentIndex])) {
+                setSaveStatus('Could not clear activations: current segment data is unavailable.', 'error');
+                return;
+            }
+
+            appData.activation_uni[currentSegmentIndex] = Array(electrodeCount).fill(0);
+            editedSegmentIds.add(currentSegmentIndex);
+            interpolationRequestId++;
+            clearMeshInterpolation();
+            document.getElementById('toggleEarliest').checked = false;
+            document.getElementById('toggleLatest').checked = false;
+            setSliderEnabled(true);
+            updateSaveButton();
+            setSaveStatus(
+                `Cleared activation times for ${electrodeCount} electrode${electrodeCount === 1 ? '' : 's'} in segment ${currentSegmentIndex}; unsaved changes.`,
+                'pending'
+            );
             render3DPlot(true);
             renderElectrogram();
             if (document.getElementById('toggleInterpolateMesh').checked) {
@@ -1129,6 +1167,7 @@
             slider.value = currentSegmentIndex;
 
             updateSliderLabel();
+            updateSaveButton();
             render3DPlot(true);
             renderElectrogram();
         }
@@ -1220,6 +1259,7 @@
                 currentSegmentIndex = targetSeg;
                 document.getElementById('pageSlider').value = currentSegmentIndex;
                 updateSliderLabel();
+                updateSaveButton();
                 render3DPlot(true);
                 renderElectrogram();
             } else {
@@ -1237,6 +1277,7 @@
                 currentSegmentIndex = targetSeg;
                 document.getElementById('pageSlider').value = currentSegmentIndex;
                 updateSliderLabel();
+                updateSaveButton();
                 render3DPlot(true);
                 renderElectrogram();
             } else {
@@ -1368,10 +1409,7 @@
             }
         });
 
-        document.getElementById('toggleRefinedMesh').addEventListener('change', (e) => {
-            document.getElementById('meshTypeLabel').textContent = e.target.checked
-                ? 'Refined Mesh'
-                : 'Original Mesh';
+        document.getElementById('toggleRefinedMesh').addEventListener('change', () => {
             if (!appData) return;
             interpolationRequestId++;
             clearMeshInterpolation();

@@ -340,6 +340,11 @@ input[type='range']::-moz-range-thumb {
     white-space: nowrap;
 }
 
+.remove-segment-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .hsv-color-wheel {
     display: block;
     flex: 0 0 auto;
