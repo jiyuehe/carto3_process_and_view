@@ -272,7 +272,7 @@ def qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrela
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activation_times_unipolar, surface_signal_smooth):
+def activation_initial(n, result_folder, qrs_subtracted, negative_dvdt, egm_unipolar, activation_times_unipolar, surface_signal_smooth):
     n_samples, n_channels = qrs_subtracted.shape
 
     sample_axis = np.arange(n_samples)
@@ -296,11 +296,25 @@ def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activatio
             color='blue',
             linewidth=0.7,
         )
+
+        channel_negative_dvdt = negative_dvdt[:, channel_idx]
+        dvdt_peak = np.max(np.abs(channel_negative_dvdt))
+        scaled_negative_dvdt = channel_negative_dvdt * (
+            0.3 * trace_spacing / max(dvdt_peak, np.finfo(float).eps)
+        )
+        subtracted_axis.plot(
+            sample_axis,
+            scaled_negative_dvdt + offset,
+            color='magenta',
+            linewidth=0.7,
+            zorder=1,
+        )
         subtracted_axis.plot(
             sample_axis,
             qrs_subtracted[:, channel_idx] + offset,
             color='blue',
             linewidth=0.7,
+            zorder=2,
         )
         activation_peaks = activation_times_unipolar[channel_idx]
         subtracted_axis.scatter(
@@ -317,7 +331,7 @@ def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activatio
     subtracted_axis.plot(surface_axis, surface_signal_scaled, color='magenta', linewidth=1.0)
 
     original_axis.set_title('Original unipolar electrograms')
-    subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
+    subtracted_axis.set_title('QRS-subtracted electrograms, negative dV/dt, and activation times')
     original_axis.set_xlabel('time (ms)')
     subtracted_axis.set_xlabel('time (ms)')
     original_axis.set_yticks([])
@@ -363,23 +377,27 @@ def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtract
             egm_unipolar[:, channel_idx] + offset,
             color='blue',
             linewidth=0.7,
-        )
-        subtracted_axis.plot(
-            sample_axis,
-            qrs_subtracted[:, channel_idx] + offset,
-            color='blue',
-            linewidth=0.7,
+            zorder=1,
         )
         channel_correlation = cross_correlation[:, channel_idx]
         correlation_peak = np.max(np.abs(channel_correlation))
         scaled_correlation = channel_correlation * (
             0.3 * trace_spacing / max(correlation_peak, np.finfo(float).eps)
         )
+
         subtracted_axis.plot(
             sample_axis,
             scaled_correlation + offset,
             color='magenta',
             linewidth=0.7,
+            zorder=1,
+        )
+        subtracted_axis.plot(
+            sample_axis,
+            qrs_subtracted[:, channel_idx] + offset,
+            color='blue',
+            linewidth=0.7,
+            zorder=2,
         )
         activation_peaks = activation_times_unipolar_refined[channel_idx]
         if not np.array_equal(activation_peaks, [0]):

@@ -298,19 +298,16 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
                 utility.debug_plots.qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrelations, cycle_length_unipolar, mapping_name_unipolar)
 
             # for each qrs subtracted unipolar electrogram, find out the activation time by finding the peak of the maximum negative slope (dv/dt)
-            if not np.isnan(cycle_length_this_segment):
-                minimum_activation_distance = int(np.floor(0.9 * cycle_length_this_segment))
-            elif np.isnan(cycle_length_this_segment):
-                minimum_activation_distance = minimum_allowable_cycle_length
-
             activation_times_unipolar = [[] for _ in range(n_channels)]
+            negative_dvdt = np.empty_like(qrs_subtracted, dtype=float)
             for channel_idx in range(n_channels):
                 electrogram = qrs_subtracted[:, channel_idx]
-                negative_dvdt = -np.diff(electrogram, prepend=electrogram[0])
+                negative_dvdt[:, channel_idx] = -np.diff(electrogram, prepend=electrogram[0])
+                channel_negative_dvdt = negative_dvdt[:, channel_idx]
 
                 if np.ptp(electrogram) >= 0.5: # mV
                     # find peaks on the electrogram
-                    peak_indices, peak_properties = find_peaks(negative_dvdt, distance=minimum_activation_distance, height=0.2*np.ptp(negative_dvdt))
+                    peak_indices, peak_properties = find_peaks(channel_negative_dvdt, distance=minimum_allowable_cycle_length, height=0.2*np.ptp(channel_negative_dvdt))
 
                     # check if the negative_dvdt has good signal quality by comparing the peak heights: good signal means the peak heights are relatively similar
                     peak_values = peak_properties['peak_heights']
@@ -320,8 +317,8 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
                     )
 
                     if good_signal_flag == 1:
-                        if np.any(np.isfinite(negative_dvdt)):
-                            finite_dvdt = negative_dvdt[np.isfinite(negative_dvdt)]
+                        if np.any(np.isfinite(channel_negative_dvdt)):
+                            finite_dvdt = channel_negative_dvdt[np.isfinite(channel_negative_dvdt)]
                             dvdt_baseline = np.median(finite_dvdt)
                             dvdt_noise = 1.4826 * np.median(np.abs(finite_dvdt - dvdt_baseline))
                             peak_height_threshold = max(
@@ -330,8 +327,8 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
                             )
                             peak_prominence_threshold = max(2 * dvdt_noise, 0.0)
                             activation_peaks, _ = find_peaks(
-                                np.nan_to_num(negative_dvdt, nan=-np.inf),
-                                distance=minimum_activation_distance,
+                                np.nan_to_num(channel_negative_dvdt, nan=-np.inf),
+                                distance=minimum_allowable_cycle_length,
                                 height=peak_height_threshold,
                                 prominence=peak_prominence_threshold,
                             )
@@ -347,7 +344,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
             debug_plot = 0
             if debug_plot: 
                 result_folder = directory['result']
-                utility.debug_plots.activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activation_times_unipolar, surface_signal_smooth)
+                utility.debug_plots.activation_initial(n, result_folder, qrs_subtracted, negative_dvdt, egm_unipolar, activation_times_unipolar, surface_signal_smooth)
 
             # refine activation time detections
             # ------------------------------
@@ -397,7 +394,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
 
                     correlation_peaks, _ = find_peaks(
                         np.nan_to_num(channel_cross_correlation, nan=-np.inf),
-                        distance=minimum_activation_distance,
+                        distance=minimum_allowable_cycle_length,
                         height=peak_height_threshold,
                         prominence=peak_prominence_threshold,
                     )
@@ -419,7 +416,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
             if debug_plot: 
                 result_folder = directory['result']
                 utility.debug_plots.activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, cross_correlation, surface_signal_smooth, surface_signal_sum)
-#%%
+
         # find out the cycle length of all the unipolar electrograms across all recording segments
         # ------------------------------------------------------------
         all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
@@ -438,7 +435,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
         # find out the best window of interest
         # ------------------------------------------------------------
         if map_id in sinus_rhythm_map_ids:
-            size_of_woi = 400
+            size_of_woi = 350
         else:
             size_of_woi = int(median_cycle_length * 1.3)
 
