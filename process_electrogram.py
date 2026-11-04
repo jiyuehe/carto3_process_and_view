@@ -31,24 +31,25 @@ directory = configuration.directory_setup()
 patients = common.read_info_csv(directory)
 
 n_left_atrium = 0
-n_loaded = 0
+n_good = 0
 for i in range(0,len(patients)):
     if patients[i]['atrium_flag'] == 'LA':
         n_left_atrium = n_left_atrium + 1
 
-    if patients[i]['status'] == 'loaded':
-        n_loaded = n_loaded + 1
+    if 'good.' in patients[i]['quality']:
+        n_good = n_good + 1
 
-print(f'Total number of left atrium clinical maps: {n_left_atrium}. Loaded {n_loaded} maps.')
+print(f'Total number of left atrium clinical maps: {n_left_atrium}. Good maps: {n_good}.')
 
 sinus_rhythm_map_ids = list(range(238,248))
+map_ids = [19]
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
+for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
     patient = patients[map_id]
 
-    if patient['atrium_flag'] == 'LA':
+    if patient['atrium_flag'] == 'LA' and 'good.' in patient['quality']:
         name_prefix = f'{patient['id']}_{patient['mesh']}'
         print(f'process {name_prefix}')
 
@@ -142,11 +143,11 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
             unipolar_filter = butter(4, unipolar_bandpass_hz, btype='bandpass', fs=sampling_rate_hz, output='sos')
             egm_unipolar_filtered = sosfiltfilt(unipolar_filter, egm_unipolar, axis=0)
 
-            # smooth the electrogram
+            # smooth the unipolar electrogram to reduce tiny but high frequency noise, which help reduce false activation detection on dv/dt peaks
             for channel_idx in range(egm_unipolar_filtered.shape[1]):
                 electrogram = egm_unipolar_filtered[:, channel_idx].astype(float)
 
-                smooth_window = 10
+                smooth_window = 5 # NOTE: smoothing too much will reduce the peak amplitude of the electrogram, which may affect the activation time detection
                 smooth_kernel = np.ones(smooth_window) / smooth_window
                 electrogram = np.convolve(electrogram, smooth_kernel, mode='same')
 
@@ -245,7 +246,7 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
             # ------------------------------
             # for each qrs subtracted unipolar electrogram, do auto correlation to find out its cycle length
             if map_id in sinus_rhythm_map_ids:
-                minimum_allowable_cycle_length = 650
+                minimum_allowable_cycle_length = 500
             else:
                 minimum_allowable_cycle_length = 150
 
@@ -368,6 +369,7 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
 
                 # for each unipolar electrogram channel, crosscorrelate the activation template with the QRS-subtracted unipolar electrogram to refine the activation time detections
                 activation_times_unipolar_refined = [[] for _ in range(n_channels)]
+                cross_correlation = np.empty_like(qrs_subtracted, dtype=float)
                 for channel_idx in range(n_channels):
                     electrogram = qrs_subtracted[:, channel_idx]
 
@@ -377,19 +379,24 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
                     electrogram_centered = electrogram - np.median(electrogram)
 
                     # normalize the cross-correlation to find the lag that best aligns the template with this channel
-                    cross_correlation = np.correlate(electrogram_centered, template_centered, mode='same')
+                    cross_correlation[:, channel_idx] = np.correlate(
+                        electrogram_centered,
+                        template_centered,
+                        mode='same',
+                    )
+                    channel_cross_correlation = cross_correlation[:, channel_idx]
 
                     # find out peak threshold
-                    correlation_baseline = np.median(cross_correlation)
-                    correlation_noise = 1.4826 * np.median(np.abs(cross_correlation - correlation_baseline))
+                    correlation_baseline = np.median(channel_cross_correlation)
+                    correlation_noise = 1.4826 * np.median(np.abs(channel_cross_correlation - correlation_baseline))
                     peak_height_threshold = max(
                         correlation_baseline + 2 * correlation_noise,
-                        0.02 * np.max(cross_correlation),
+                        0.02 * np.max(channel_cross_correlation),
                     )
                     peak_prominence_threshold = max(2 * correlation_noise, 0.0)
 
                     correlation_peaks, _ = find_peaks(
-                        np.nan_to_num(cross_correlation, nan=-np.inf),
+                        np.nan_to_num(channel_cross_correlation, nan=-np.inf),
                         distance=minimum_activation_distance,
                         height=peak_height_threshold,
                         prominence=peak_prominence_threshold,
@@ -397,7 +404,7 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
 
                     # remove correlation peaks that are at the very beginning or very end of the signal, as they may be artifacts
                     correlation_peaks = correlation_peaks[
-                        (correlation_peaks != 0) & (correlation_peaks != cross_correlation.shape[0])
+                        (correlation_peaks != 0) & (correlation_peaks != channel_cross_correlation.shape[0])
                     ]
 
                     if len(correlation_peaks) != 0:
@@ -411,13 +418,13 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
             debug_plot = 0
             if debug_plot: 
                 result_folder = directory['result']
-                utility.debug_plots.activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, surface_signal_smooth, surface_signal_sum)
-
+                utility.debug_plots.activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, cross_correlation, surface_signal_smooth, surface_signal_sum)
+#%%
         # find out the cycle length of all the unipolar electrograms across all recording segments
         # ------------------------------------------------------------
         all_cycle_lengths = np.concatenate(cycle_lengths_per_segment) # stack all the cycle lengths from each segment into a single array
         all_cycle_lengths = all_cycle_lengths[np.isfinite(all_cycle_lengths)] # remove NaN values
-        median_cycle_length = np.median(all_cycle_lengths)
+        median_cycle_length = int(np.median(all_cycle_lengths))
 
         catheter_processed = {}
         catheter_processed['surface_ecg_sum'] = surface_ecg_sum
@@ -431,9 +438,9 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
         # find out the best window of interest
         # ------------------------------------------------------------
         if map_id in sinus_rhythm_map_ids:
-            half_window_size_of_woi = 400 // 2
+            size_of_woi = 400
         else:
-            half_window_size_of_woi = median_cycle_length * 1.5 // 2
+            size_of_woi = int(median_cycle_length * 1.3)
 
         electrode_positions_all = np.concatenate([
             np.asarray(segment, dtype=float).reshape(-1, 3)
@@ -442,14 +449,14 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
         electrode_positions_valid = np.all(np.isfinite(electrode_positions_all), axis=1)
 
         # grab activations within window of interest
-        t_range = np.arange(1600, 2201, 10)
-        outlier_metric = np.zeros((len(t_range),), dtype=float)
-        for i, t in enumerate(t_range):
-            if i % (len(t_range)//4) == 0:
-                print(f'    find the best window of interest {i+1 / len(t_range) * 100:.2f}%')
+        t_start_range = np.arange(2000 - 2*size_of_woi, 2000+1 - size_of_woi, 10)
+        outlier_metric = np.zeros((len(t_start_range),), dtype=float)
+        for i, t in enumerate(t_start_range):
+            if i % (len(t_start_range)//4) == 0:
+                print(f'    find the best window of interest {i+1 / len(t_start_range) * 100:.2f}%')
 
-            t_start = t - half_window_size_of_woi  # window of interest start time index
-            t_end = t + half_window_size_of_woi  # window of interest end time index
+            t_start = t  # window of interest start time index
+            t_end = t + size_of_woi  # window of interest end time index
             catheter_processed = utility.ui_functions.grab_activations_within_window_of_interest(
                 catheter_processed, t_start, t_end
             )
@@ -499,8 +506,8 @@ for map_id in sinus_rhythm_map_ids: #range(0,len(patients)):
 
         min_outlier_ratio_idx = int(np.argmax(outlier_metric))
 
-        t_start = t_range[min_outlier_ratio_idx] - half_window_size_of_woi  # window of interest start time index
-        t_end = t_range[min_outlier_ratio_idx] + half_window_size_of_woi  # window of interest end time index
+        t_start = t_start_range[min_outlier_ratio_idx]  # window of interest start time index
+        t_end = t_start + size_of_woi  # window of interest end time index
         if t_end > 2500:
             t_end = 2500
 

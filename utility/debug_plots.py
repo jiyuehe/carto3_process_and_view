@@ -97,7 +97,14 @@ def qrs_timings_on_surface_electrograms(n, result_folder, surface_name, egm_surf
 
     ax.plot(surface_signal_sum_scaled, color='magenta', linewidth=1)
     ax.plot(surface_signal_smooth_scaled, color='blue', linewidth=1)
-    ax.scatter(qrs_peak_indices, surface_signal_smooth_scaled[qrs_peak_indices], color='red', s=20, zorder=5)
+    ax.scatter(
+        qrs_peak_indices,
+        surface_signal_smooth_scaled[qrs_peak_indices],
+        facecolors=(1, 0, 0, 0.6),
+        edgecolors='none',
+        s=20,
+        zorder=5,
+    )
     
     ax.set_xlabel('Time (ms)')
     yticks = np.concatenate(([-spacing], offsets))
@@ -242,7 +249,8 @@ def qrs_subtracted_autocorrelation(n, result_folder, qrs_subtracted, autocorrela
                 time_ms[cl],
                 autocorrelations[channel_idx][cl] * autocorrelation_scale
                 + trace_offsets[channel_idx],
-                color='red',
+                facecolors=(1, 0, 0, 0.6),
+                edgecolors='none',
                 s=16,
                 zorder=3,
             )
@@ -298,7 +306,8 @@ def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activatio
         subtracted_axis.scatter(
             activation_peaks,
             qrs_subtracted[activation_peaks, channel_idx] + offset,
-            color='red',
+            facecolors=(1, 0, 0, 0.6),
+            edgecolors='none',
             s=12,
             zorder=3,
         )
@@ -329,7 +338,7 @@ def activation_initial(n, result_folder, qrs_subtracted, egm_unipolar, activatio
     plt.savefig(fig_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
 
-def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, surface_signal_smooth, surface_signal_sum):
+def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtracted, activation_times_unipolar_refined, half_window, activation_template_unipolar, cross_correlation, surface_signal_smooth, surface_signal_sum):
     n_samples, n_channels = qrs_subtracted.shape
 
     sample_axis = np.arange(n_samples)
@@ -361,12 +370,24 @@ def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtract
             color='blue',
             linewidth=0.7,
         )
+        channel_correlation = cross_correlation[:, channel_idx]
+        correlation_peak = np.max(np.abs(channel_correlation))
+        scaled_correlation = channel_correlation * (
+            0.3 * trace_spacing / max(correlation_peak, np.finfo(float).eps)
+        )
+        subtracted_axis.plot(
+            sample_axis,
+            scaled_correlation + offset,
+            color='magenta',
+            linewidth=0.7,
+        )
         activation_peaks = activation_times_unipolar_refined[channel_idx]
         if not np.array_equal(activation_peaks, [0]):
             subtracted_axis.scatter(
                 activation_peaks,
                 qrs_subtracted[activation_peaks, channel_idx] + offset,
-                color='red',
+                facecolors=(1, 0, 0, 0.6),
+                edgecolors='none',
                 s=12,
                 zorder=3,
             )
@@ -385,7 +406,7 @@ def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtract
 
     original_axis.set_title('Original unipolar electrograms')
     template_axis.set_title('Activation template')
-    subtracted_axis.set_title('QRS-subtracted electrograms and activation times')
+    subtracted_axis.set_title('QRS-subtracted electrograms, cross-correlation, and activation times')
     original_axis.set_xlabel('time (ms)')
     template_axis.set_xlabel('time (ms)')
     subtracted_axis.set_xlabel('time (ms)')
@@ -420,7 +441,12 @@ def electrode_position_and_projection(n, original_vertex, original_face, electro
     p = electrode_positions_all
     fig.add_trace(go.Scatter3d(
         x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-        marker=dict(size=4, color='red'), name='Original electrodes',
+        marker=dict(
+            size=4,
+            color='red',
+            opacity=0.6,
+            line=dict(width=0),
+        ), name='Original electrodes',
         legendgroup='original', showlegend=(n == 0)
     ))
     p = electrode_positions_on_original_mesh_all
@@ -445,7 +471,12 @@ def electrode_position_and_projection(n, original_vertex, original_face, electro
     p = electrode_positions_all
     fig.add_trace(go.Scatter3d(
         x=p[:, 0], y=p[:, 1], z=p[:, 2], mode='markers',
-        marker=dict(size=4, color='red'), name='Original electrodes',
+        marker=dict(
+            size=4,
+            color='red',
+            opacity=0.6,
+            line=dict(width=0),
+        ), name='Original electrodes',
         legendgroup='original', showlegend=(n == 0)
     ))
     p = electrode_positions_on_refined_mesh_all
