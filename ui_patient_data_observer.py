@@ -245,7 +245,7 @@ def validate_activation_updates(payload):
         expected_length = len(data_store['electrode_positions'][segment_id])
         if activation.ndim != 1 or activation.shape[0] != expected_length:
             raise ValueError(
-                f'activation_uni for segment {segment_id} must have length {expected_length}'
+                f'segment {segment_id}, # of electrode is {expected_length}, but # of activations is {activation.shape[0]}. they must be equal.'
             )
         if not np.all(np.isfinite(activation)):
             raise ValueError(f'activation_uni for segment {segment_id} contains a non-finite value')
