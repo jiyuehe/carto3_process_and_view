@@ -42,7 +42,7 @@ for i in range(0,len(patients)):
 print(f'Total number of left atrium clinical maps: {n_left_atrium}. Good maps: {n_good}.')
 
 sinus_rhythm_map_ids = list(range(238,248))
-map_ids = [256]
+map_ids = [257,258,259,261,262]
 
 #%%
 suffix = '_carto_catheter.npz'
@@ -89,7 +89,7 @@ for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)
             surface_electrogram = catheter['surface_electrogram']
             surface_name = catheter['surface_name']
             utility.debug_plots.mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unipolar, mapping_electrogram_unipolar, surface_name, surface_electrogram)
-#%%
+
         # loop through each recording segment
         # ------------------------------------------------------------
         mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
