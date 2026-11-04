@@ -46,10 +46,10 @@ map_ids = [19]
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
+for map_id in range(0,len(patients)): # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
     patient = patients[map_id]
 
-    if patient['atrium_flag'] == 'LA' and 'good.' in patient['quality']:
+    if patient['atrium_flag'] == 'LA' and 'bad.' not in patient['quality']:
         name_prefix = f'{patient['id']}_{patient['mesh']}'
         print(f'process {name_prefix}')
 
@@ -99,7 +99,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
         mapping_electrogram_unipolar_qrs_subtracted = [None for _ in range(n_segment)]
         surface_ecg_sum = [None for _ in range(n_segment)]
         cycle_lengths_per_segment = [None for _ in range(n_segment)]
-        for n in [69]:#range(n_segment):
+        for n in range(n_segment):
             if n % (n_segment//4) == 0:
                 print(f'    recording segment id {n} in [0, {n_segment-1}]')
 
