@@ -99,7 +99,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
         mapping_electrogram_unipolar_qrs_subtracted = [None for _ in range(n_segment)]
         surface_ecg_sum = [None for _ in range(n_segment)]
         cycle_lengths_per_segment = [None for _ in range(n_segment)]
-        for n in range(n_segment):
+        for n in [69]:#range(n_segment):
             if n % (n_segment//4) == 0:
                 print(f'    recording segment id {n} in [0, {n_segment-1}]')
 
@@ -246,7 +246,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
             # ------------------------------
             # for each qrs subtracted unipolar electrogram, do auto correlation to find out its cycle length
             if map_id in sinus_rhythm_map_ids:
-                minimum_allowable_cycle_length = 500
+                minimum_allowable_cycle_length = 300
             else:
                 minimum_allowable_cycle_length = 150
 
@@ -323,7 +323,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
                             dvdt_noise = 1.4826 * np.median(np.abs(finite_dvdt - dvdt_baseline))
                             peak_height_threshold = max(
                                 dvdt_baseline + 2 * dvdt_noise,
-                                0.02 * np.max(finite_dvdt),
+                                0.1 * np.max(finite_dvdt),
                             )
                             peak_prominence_threshold = max(2 * dvdt_noise, 0.0)
                             activation_peaks, _ = find_peaks(
@@ -388,7 +388,7 @@ for map_id in [245]: #map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
                     correlation_noise = 1.4826 * np.median(np.abs(channel_cross_correlation - correlation_baseline))
                     peak_height_threshold = max(
                         correlation_baseline + 2 * correlation_noise,
-                        0.02 * np.max(channel_cross_correlation),
+                        0.1 * np.max(channel_cross_correlation),
                     )
                     peak_prominence_threshold = max(2 * correlation_noise, 0.0)
 

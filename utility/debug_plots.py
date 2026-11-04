@@ -322,7 +322,7 @@ def activation_initial(n, result_folder, qrs_subtracted, negative_dvdt, egm_unip
             qrs_subtracted[activation_peaks, channel_idx] + offset,
             facecolors=(1, 0, 0, 0.6),
             edgecolors='none',
-            s=12,
+            s=20,
             zorder=3,
         )
 
@@ -406,7 +406,7 @@ def activation_template_correlation(n, result_folder, egm_unipolar, qrs_subtract
                 qrs_subtracted[activation_peaks, channel_idx] + offset,
                 facecolors=(1, 0, 0, 0.6),
                 edgecolors='none',
-                s=12,
+                s=20,
                 zorder=3,
             )
 
