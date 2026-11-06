@@ -41,8 +41,8 @@ for i in range(0,len(patients)):
 
 print(f'Total number of left atrium clinical maps: {n_left_atrium}. Good maps: {n_good}.')
 
-sinus_rhythm_map_ids = list(range(238,248))
-map_ids = [263]
+sinus_rhythm_map_ids = list(range(0,0))
+map_ids = [10]
 
 #%%
 suffix = '_carto_catheter.npz'
