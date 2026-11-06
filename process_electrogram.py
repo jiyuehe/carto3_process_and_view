@@ -42,7 +42,7 @@ for i in range(0,len(patients)):
 print(f'Total number of left atrium clinical maps: {n_left_atrium}. Good maps: {n_good}.')
 
 sinus_rhythm_map_ids = list(range(238,248))
-map_ids = [57]
+map_ids = [263]
 
 #%%
 suffix = '_carto_catheter.npz'
@@ -89,7 +89,7 @@ for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)
             surface_electrogram = catheter['surface_electrogram']
             surface_name = catheter['surface_name']
             utility.debug_plots.mapping_and_surface_electrogram(segment_id, result_folder, mapping_name_unipolar, mapping_electrogram_unipolar, surface_name, surface_electrogram)
-
+#%%
         # loop through each recording segment
         # ------------------------------------------------------------
         mapping_electrogram_unipolar = catheter['mapping_electrogram_unipolar']
@@ -248,7 +248,7 @@ for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)
             if map_id in sinus_rhythm_map_ids:
                 minimum_allowable_cycle_length = 300
             else:
-                minimum_allowable_cycle_length = 150
+                minimum_allowable_cycle_length = 160
 
             n_samples, n_channels = qrs_subtracted.shape
             cycle_length_unipolar = np.full(n_channels, np.nan, dtype=float)
@@ -277,7 +277,7 @@ for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)
 
                         # blank out the first portion of the autocorrelation to avoid detecting the zero-lag peak and nearby peaks
                         autocorrelation[:minimum_allowable_cycle_length] = 0
-                        candidate_lags, properties = find_peaks(autocorrelation,distance=minimum_allowable_cycle_length)
+                        candidate_lags, properties = find_peaks(autocorrelation,distance=minimum_allowable_cycle_length, height=0.2*np.ptp(autocorrelation))
 
                         if len(candidate_lags) > 0:
                             candidate_lags = candidate_lags[candidate_lags != 1]
@@ -388,7 +388,7 @@ for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)
                     correlation_noise = 1.4826 * np.median(np.abs(channel_cross_correlation - correlation_baseline))
                     peak_height_threshold = max(
                         correlation_baseline + 2 * correlation_noise,
-                        0.1 * np.max(channel_cross_correlation),
+                        0.3 * np.max(channel_cross_correlation),
                     )
                     peak_prominence_threshold = max(2 * correlation_noise, 0.0)
 
