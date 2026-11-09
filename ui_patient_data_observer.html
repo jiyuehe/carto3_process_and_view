@@ -47,6 +47,7 @@
                 <div class="mesh-selector-row">
                     <label for="meshSelector">Mesh</label>
                     <select id="meshSelector" aria-label="Select mesh data"></select>
+                    <span class="mesh-click-hint">Click an electrode to view its segment</span>
                     <span id="meshLoadStatus" class="mesh-load-status" role="status" aria-live="polite"></span>
                 </div>
                 <div id="mesh_and_electrode" class="plot-3d"></div>
@@ -87,6 +88,7 @@
         // Global variables
         let appData = null;
         let currentSegmentIndex = 0;
+        let selectedElectrodeId = null;
         let electrogramRequestId = 0;
         let interpolationRequestId = 0;
         const editedSegmentIds = new Set();
@@ -151,6 +153,17 @@
                 for (let i = 0; i < seg.length; i++) all.push(seg[i]);
             }
             return all;
+        }
+
+        function getAllElectrodeIds() {
+            const ids = [];
+            for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
+                const positions = appData.electrode_positions[segmentId] || [];
+                for (let electrodeId = 0; electrodeId < positions.length; electrodeId++) {
+                    ids.push([segmentId, electrodeId]);
+                }
+            }
+            return ids;
         }
 
         function getCurrentActivation() {
@@ -325,6 +338,7 @@
         function applyLoadedMeshData(loadedData, populateMeshOptions = false) {
             appData = loadedData;
             currentSegmentIndex = 0;
+            selectedElectrodeId = null;
 
             const meshSelector = document.getElementById('meshSelector');
             if (populateMeshOptions) {
@@ -601,20 +615,22 @@
             }
         }
 
-        function splitElectrodesByActivation(activation, electrodePositions, range = null) {
+        function splitElectrodesByActivation(activation, electrodePositions, range = null, electrodeIds = []) {
             const colors = computeColors(activation, range);
-            const activePosns = [], activeColors = [], inactivePosns = [];
-            const inactiveColors = [];
+            const activePosns = [], activeColors = [], activeIds = [];
+            const inactivePosns = [], inactiveColors = [], inactiveIds = [];
             electrodePositions.forEach((pos, index) => {
                 if (activation[index] !== 0 && Number.isFinite(activation[index])) {
                     activePosns.push(pos);
                     activeColors.push(colors[index]);
+                    activeIds.push(electrodeIds[index]);
                 } else {
                     inactivePosns.push(pos);
                     inactiveColors.push(colors[index]);
+                    inactiveIds.push(electrodeIds[index]);
                 }
             });
-            return { activePosns, activeColors, inactivePosns, inactiveColors };
+            return { activePosns, activeColors, activeIds, inactivePosns, inactiveColors, inactiveIds };
         }
 
         function update3DActivationColors() {
@@ -623,12 +639,16 @@
             const activation = getCurrentActivation();
             const electrodePositions = getCurrentSegmentPositions();
             const allElectrodePositions = getAllSegmentPositions();
+            const currentElectrodeIds = electrodePositions.map((_, electrodeId) => [currentSegmentIndex, electrodeId]);
+            const allElectrodeIds = getAllElectrodeIds();
             const meshActivation = interpolateMeshActivation(activation);
             const meshPhase = interpolateMeshPhase();
             const range = getGlobalActivationRange();
             const meshColors = getMeshColorSettings(meshActivation, meshPhase, range);
             const showMesh = document.getElementById('toggleInterpolateMesh').checked;
-            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions, range);
+            const {
+                activePosns, activeColors, activeIds, inactivePosns, inactiveColors, inactiveIds
+            } = splitElectrodesByActivation(activation, electrodePositions, range, currentElectrodeIds);
 
             // update mesh coloring
             const meshUpdate = meshColors.vertexcolor
@@ -651,12 +671,14 @@
                 x: [activePosns.map(p => p[0])],
                 y: [activePosns.map(p => p[1])],
                 z: [activePosns.map(p => p[2])],
+                customdata: [activeIds],
                 'marker.color': [activeColors]
             }, [1]);
             Plotly.restyle(plot, {
                 x: [inactivePosns.map(p => p[0])],
                 y: [inactivePosns.map(p => p[1])],
                 z: [inactivePosns.map(p => p[2])],
+                customdata: [inactiveIds],
                 'marker.color': [inactiveColors]
             }, [2]);
             // update other-segments electrodes (all electrodes except current segment)
@@ -666,24 +688,30 @@
             const before = allElectrodePositions.slice(0, startIndex);
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
+            const otherIds = allElectrodeIds.slice(0, startIndex)
+                .concat(allElectrodeIds.slice(startIndex + currLen));
             const allActivations = getAllActivations();
             const otherActivations = allActivations.slice(0, startIndex).concat(allActivations.slice(startIndex + currLen));
             const {
                 activePosns: otherActivePosns,
                 activeColors: otherActiveColors,
+                activeIds: otherActiveIds,
                 inactivePosns: otherInactivePosns,
-                inactiveColors: otherInactiveColors
-            } = splitElectrodesByActivation(otherActivations, otherPosns, range);
+                inactiveColors: otherInactiveColors,
+                inactiveIds: otherInactiveIds
+            } = splitElectrodesByActivation(otherActivations, otherPosns, range, otherIds);
             Plotly.restyle(plot, {
                 x: [otherActivePosns.map(p => p[0])],
                 y: [otherActivePosns.map(p => p[1])],
                 z: [otherActivePosns.map(p => p[2])],
+                customdata: [otherActiveIds],
                 'marker.color': [otherActiveColors]
             }, [3]);
             Plotly.restyle(plot, {
                 x: [otherInactivePosns.map(p => p[0])],
                 y: [otherInactivePosns.map(p => p[1])],
                 z: [otherInactivePosns.map(p => p[2])],
+                customdata: [otherInactiveIds],
                 'marker.color': [otherInactiveColors]
             }, [4]);
 
@@ -692,6 +720,7 @@
         function render3DPlot(preserveCamera = false) {
             const activation = getCurrentActivation();
             const electrodePositions = getCurrentSegmentPositions();
+            const currentElectrodeIds = electrodePositions.map((_, electrodeId) => [currentSegmentIndex, electrodeId]);
             const meshActivation = interpolateMeshActivation(activation);
             const meshPhase = interpolateMeshPhase();
             const activationRange = getGlobalActivationRange();
@@ -724,8 +753,12 @@
                 hoverinfo: 'none',
             };
 
-            const { activePosns, activeColors, inactivePosns, inactiveColors } = splitElectrodesByActivation(activation, electrodePositions, activationRange);
+            const {
+                activePosns, activeColors, activeIds, inactivePosns, inactiveColors, inactiveIds
+            } = splitElectrodesByActivation(activation, electrodePositions, activationRange, currentElectrodeIds);
             const allElectrodePositions = getAllSegmentPositions();
+            const allElectrodeIds = getAllElectrodeIds();
+            const electrodeHover = 'Segment %{customdata[0]}, electrode %{customdata[1]}<extra></extra>';
 
             const electrodeActiveTrace = {
                 type: 'scatter3d',
@@ -733,8 +766,9 @@
                 x: activePosns.map(p => p[0]),
                 y: activePosns.map(p => p[1]),
                 z: activePosns.map(p => p[2]),
+                customdata: activeIds,
                 marker: { size: 4, color: activeColors, opacity: 1 },
-                showlegend: false, hoverinfo: 'none',
+                showlegend: false, hovertemplate: electrodeHover,
             };
 
             const electrodeInactiveTrace = {
@@ -743,8 +777,9 @@
                 x: inactivePosns.map(p => p[0]),
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
+                customdata: inactiveIds,
                 marker: { size: 2, color: inactiveColors, opacity: 0.1 },
-                showlegend: false, hoverinfo: 'none',
+                showlegend: false, hovertemplate: electrodeHover,
             };
 
             // other segments (not the currently selected segment)
@@ -754,14 +789,18 @@
             const before = allElectrodePositions.slice(0, startIndex);
             const after = allElectrodePositions.slice(startIndex + currLen);
             const otherPosns = before.concat(after);
+            const otherIds = allElectrodeIds.slice(0, startIndex)
+                .concat(allElectrodeIds.slice(startIndex + currLen));
             const allActivations = getAllActivations();
             const otherActivations = allActivations.slice(0, startIndex).concat(allActivations.slice(startIndex + currLen));
             const {
                 activePosns: otherActivePosns,
                 activeColors: otherActiveColors,
+                activeIds: otherActiveIds,
                 inactivePosns: otherInactivePosns,
-                inactiveColors: otherInactiveColors
-            } = splitElectrodesByActivation(otherActivations, otherPosns, activationRange);
+                inactiveColors: otherInactiveColors,
+                inactiveIds: otherInactiveIds
+            } = splitElectrodesByActivation(otherActivations, otherPosns, activationRange, otherIds);
 
             const otherSegmentsActiveTrace = {
                 type: 'scatter3d',
@@ -769,8 +808,9 @@
                 x: otherActivePosns.map(p => p[0]),
                 y: otherActivePosns.map(p => p[1]),
                 z: otherActivePosns.map(p => p[2]),
+                customdata: otherActiveIds,
                 marker: { size: 2, color: otherActiveColors, opacity: 0.8 },
-                showlegend: false, hoverinfo: 'none'
+                showlegend: false, hovertemplate: electrodeHover
             };
 
             const otherSegmentsInactiveTrace = {
@@ -779,8 +819,9 @@
                 x: otherInactivePosns.map(p => p[0]),
                 y: otherInactivePosns.map(p => p[1]),
                 z: otherInactivePosns.map(p => p[2]),
+                customdata: otherInactiveIds,
                 marker: { size: 2, color: otherInactiveColors, opacity: 0.1 },
-                showlegend: false, hoverinfo: 'none'
+                showlegend: false, hovertemplate: electrodeHover
             };
 
             const labelTexts = electrodePositions.map((_, i) => i.toString());
@@ -791,10 +832,25 @@
                 y: electrodePositions.map(p => p[1]),
                 z: electrodePositions.map(p => p[2]),
                 text: labelTexts,
+                customdata: currentElectrodeIds,
                 textposition: 'middle center',
                 textfont: { size: 16, color: '#000000', family: 'Arial, sans-serif' },
                 showlegend: false,
-                hoverinfo: 'none',
+                hovertemplate: electrodeHover,
+            };
+
+            const selectedPosition = selectedElectrodeId === null
+                ? null : electrodePositions[selectedElectrodeId];
+            const selectedElectrodeTrace = {
+                type: 'scatter3d',
+                mode: 'markers',
+                x: selectedPosition ? [selectedPosition[0]] : [],
+                y: selectedPosition ? [selectedPosition[1]] : [],
+                z: selectedPosition ? [selectedPosition[2]] : [],
+                customdata: selectedPosition ? [[currentSegmentIndex, selectedElectrodeId]] : [],
+                marker: { size: 9, color: '#ffcc00', opacity: 0.85 },
+                showlegend: false,
+                hovertemplate: electrodeHover
             };
 
             const layout = {
@@ -817,15 +873,20 @@
                 layout.scene.camera = mesh_and_electrode.layout.scene.camera;
             }
 
-            Plotly.newPlot('mesh_and_electrode', [
+            const plot = document.getElementById('mesh_and_electrode');
+            Plotly.newPlot(plot, [
                 atriumTrace,
                 electrodeActiveTrace,
                 electrodeInactiveTrace,
                 otherSegmentsActiveTrace,
                 otherSegmentsInactiveTrace,
-                electrodeLabelTrace
+                electrodeLabelTrace,
+                selectedElectrodeTrace
             ], layout, {
                 responsive: true
+            }).then(() => {
+                plot.removeListener('plotly_click', handleMeshElectrodeClick);
+                plot.on('plotly_click', handleMeshElectrodeClick);
             });
         }
 
@@ -1103,7 +1164,8 @@
 
             const layout = {
                 title: {
-                    text: 'cyan: reference, magenta: original, blue: QRS-subtracted',
+                    text: `${selectedElectrodeId === null ? `Segment ${currentSegmentIndex}`
+                        : `Segment ${currentSegmentIndex}, electrode ${selectedElectrodeId}`} — cyan: reference, magenta: original, blue: QRS-subtracted`,
                     font: { size: 12 }
                 },
                 xaxis: {
@@ -1157,11 +1219,27 @@
             document.getElementById('pageLabel').textContent = `Segment ${segmentLabel}`;
         }
 
-        function navigateSegments(segmentIndex) {
+        function handleMeshElectrodeClick(event) {
+            if (!appData || isSaving || isUpdatingWoi || isSwitchingMesh) return;
+            const point = event.points?.[0];
+            const identity = point?.customdata ?? point?.data?.customdata?.[point.pointNumber];
+            if (!Array.isArray(identity) || identity.length !== 2) return;
+            const [segmentId, electrodeId] = identity;
+            if (!Number.isInteger(segmentId) || !Number.isInteger(electrodeId)
+                    || !appData.electrode_positions?.[segmentId]?.[electrodeId]) return;
+
+            document.getElementById('toggleEarliest').checked = false;
+            document.getElementById('toggleLatest').checked = false;
+            setSliderEnabled(true);
+            navigateSegments(segmentId, electrodeId);
+        }
+
+        function navigateSegments(segmentIndex, electrodeId = null) {
             if (!appData || appData.segment_count === 0) return;
             currentSegmentIndex = segmentIndex;
             if (currentSegmentIndex < 0) currentSegmentIndex = appData.segment_count - 1;
             if (currentSegmentIndex >= appData.segment_count) currentSegmentIndex = 0;
+            selectedElectrodeId = electrodeId;
 
             const slider = document.getElementById('pageSlider');
             slider.value = currentSegmentIndex;
@@ -1257,6 +1335,7 @@
                 // find the segment containing the global earliest activation and navigate there
                 const targetSeg = findSegmentForOrder('earliest');
                 currentSegmentIndex = targetSeg;
+                selectedElectrodeId = null;
                 document.getElementById('pageSlider').value = currentSegmentIndex;
                 updateSliderLabel();
                 updateSaveButton();
@@ -1275,6 +1354,7 @@
                 // find the segment containing the global latest activation and navigate there
                 const targetSeg = findSegmentForOrder('latest');
                 currentSegmentIndex = targetSeg;
+                selectedElectrodeId = null;
                 document.getElementById('pageSlider').value = currentSegmentIndex;
                 updateSliderLabel();
                 updateSaveButton();

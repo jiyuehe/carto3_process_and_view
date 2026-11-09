@@ -54,6 +54,10 @@ body {
     color: #666;
 }
 
+.mesh-click-hint {
+    color: #666;
+}
+
 .plot-3d {
     flex: 1;
     height: 800px;
