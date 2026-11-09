@@ -30,29 +30,26 @@ import common
 directory = configuration.directory_setup()
 patients = common.read_info_csv(directory)
 
-n_left_atrium = 0
 n_good = 0
 n_sinus_rhythm = 0
 n_tachycardia = 0
 n_flutter = 0
 for i in range(0,len(patients)):
     if patients[i]['atrium_flag'] == 'LA':
-        n_left_atrium = n_left_atrium + 1
+        if 'good.' in patients[i]['quality']:
+            n_good = n_good + 1
 
-    if 'good.' in patients[i]['quality']:
-        n_good = n_good + 1
+            if 'sinus rhythm' in patients[i]['rhythm']:
+                n_sinus_rhythm = n_sinus_rhythm + 1
 
-        if 'sinus rhythm' in patients[i]['rhythm']:
-            n_sinus_rhythm = n_sinus_rhythm + 1
+            if 'tachycardia' in patients[i]['rhythm']:
+                n_tachycardia = n_tachycardia + 1
 
-        if 'tachycardia' in patients[i]['rhythm']:
-            n_tachycardia = n_tachycardia + 1
+            if 'flutter' in patients[i]['rhythm']:
+                n_flutter = n_flutter + 1
 
-        if 'flutter' in patients[i]['rhythm']:
-            n_flutter = n_flutter + 1
-
-print(f'Total number of left atrium clinical maps: {n_left_atrium}. Good maps: {n_good}.')
-print(f'Sinus rhythm maps: {n_sinus_rhythm}, Tachycardia maps: {n_tachycardia}, Flutter maps: {n_flutter}.')
+print(f'Number of left atrium clinical maps: {n_good}')
+print(f'Sinus rhythm: {n_sinus_rhythm} \nTachycardia: {n_tachycardia} \nFlutter: {n_flutter}')
 
 sinus_rhythm_map_ids = list(range(0,0))
 map_ids = [10]
