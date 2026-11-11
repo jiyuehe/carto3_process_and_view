@@ -14,8 +14,18 @@
             <div class="slider-container">
                 <span class="slider-label" id="pageLabel">Page</span>
                 <input type="range" id="pageSlider" min="0" max="0" value="0">
-                <button id="btnPrev">&lt;</button>
-                <button id="btnNext">&gt;</button>
+                <div class="segment-navigation-group">
+                    <div class="segment-navigation-row">
+                        <button id="btnPrev">&lt;</button>
+                        <button id="btnNext">&gt;</button>
+                    </div>
+                    <label class="toggle-switch adjudicated-toggle">
+                        <input type="checkbox" id="toggleAdjudicated">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">Adjudicated</span>
+                    </label>
+                </div>
+                <span id="searchStatus" class="search-status" role="status" aria-live="polite"></span>
                 <button type="button" id="btnRemoveSegment" class="remove-segment-button" disabled>Remove segment</button>
                 <label class="toggle-switch">
                     <input type="checkbox" id="toggleEarliest">
@@ -92,6 +102,8 @@
         let electrogramRequestId = 0;
         let interpolationRequestId = 0;
         const editedSegmentIds = new Set();
+        let adjudicatedSegmentIds = new Set();
+        let savedAdjudicatedSegmentIds = new Set();
         let isSaving = false;
         let isUpdatingWoi = false;
         let isSwitchingMesh = false;
@@ -102,6 +114,19 @@
             status.className = `save-status${type ? ` save-status-${type}` : ''}`;
         }
 
+        function hasUnsavedChanges() {
+            return editedSegmentIds.size > 0
+                || adjudicatedSegmentIds.size !== savedAdjudicatedSegmentIds.size
+                || [...adjudicatedSegmentIds].some(
+                    segmentId => !savedAdjudicatedSegmentIds.has(segmentId)
+                );
+        }
+
+        function updateAdjudicatedToggle() {
+            document.getElementById('toggleAdjudicated').checked =
+                adjudicatedSegmentIds.has(currentSegmentIndex);
+        }
+
         function updateSaveButton() {
             const saveButton = document.getElementById('btnSave');
             const cleanUpButton = document.getElementById('btnCleanUp');
@@ -110,9 +135,10 @@
             const hasInvalidActivation = Boolean(
                 document.querySelector('.activation-input[aria-invalid="true"]')
             );
+            const hasChanges = hasUnsavedChanges();
             saveButton.textContent = editCount > 0 ? `Save all (${editCount})` : 'Save';
             saveButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
-                || hasInvalidActivation || editCount === 0;
+                || hasInvalidActivation || !hasChanges;
             cleanUpButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
                 || hasInvalidActivation;
             removeSegmentButton.disabled = !appData || isSaving || isUpdatingWoi || isSwitchingMesh
@@ -127,6 +153,7 @@
             });
             document.getElementById('toggleEarliest').disabled = saving;
             document.getElementById('toggleLatest').disabled = saving;
+            document.getElementById('toggleAdjudicated').disabled = saving;
             document.getElementById('woiStart').disabled = saving;
             document.getElementById('woiEnd').disabled = saving;
             document.getElementById('meshSelector').disabled = saving;
@@ -339,6 +366,13 @@
             appData = loadedData;
             currentSegmentIndex = 0;
             selectedElectrodeId = null;
+            adjudicatedSegmentIds = new Set(
+                appData.adjudicated_flag
+                    .map((isAdjudicated, segmentId) => isAdjudicated ? segmentId : null)
+                    .filter(segmentId => segmentId !== null)
+            );
+            savedAdjudicatedSegmentIds = new Set(adjudicatedSegmentIds);
+            document.getElementById('searchStatus').textContent = '';
 
             const meshSelector = document.getElementById('meshSelector');
             if (populateMeshOptions) {
@@ -381,8 +415,8 @@
             const selectedName = event.target.value;
             const previousName = appData.name_prefix;
             if (selectedName === previousName) return;
-            if (editedSegmentIds.size > 0 && !window.confirm(
-                'Changing meshes will discard all unsaved activation edits. Continue?'
+            if (hasUnsavedChanges() && !window.confirm(
+                'Changing meshes will discard all unsaved activation and adjudication edits. Continue?'
             )) {
                 event.target.value = previousName;
                 return;
@@ -1211,12 +1245,35 @@
             const slider = document.getElementById('pageSlider');
             slider.max = Math.max(appData.segment_count - 1, 0);
             slider.value = currentSegmentIndex;
+            updateSliderAdjudication();
             updateSliderLabel();
+        }
+
+        function updateSliderAdjudication() {
+            const slider = document.getElementById('pageSlider');
+            const segmentCount = appData?.segment_count ?? 0;
+            if (segmentCount === 0) {
+                slider.style.background = '#ccc';
+                return;
+            }
+
+            const segmentWidth = 100 / segmentCount;
+            const segmentColors = Array.from(
+                { length: segmentCount },
+                (_, segmentId) => adjudicatedSegmentIds.has(segmentId)
+                    ? '#4caf50'
+                    : '#ccc'
+            );
+            const colorStops = segmentColors.map((color, segmentId) =>
+                `${color} ${segmentId * segmentWidth}% ${(segmentId + 1) * segmentWidth}%`
+            );
+            slider.style.background = `linear-gradient(to right, ${colorStops.join(', ')})`;
         }
 
         function updateSliderLabel() {
             const segmentLabel = appData.segment_count > 0 ? `${currentSegmentIndex} [0,${appData.segment_count}]` : '0/0';
             document.getElementById('pageLabel').textContent = `Segment ${segmentLabel}`;
+            updateAdjudicatedToggle();
         }
 
         function handleMeshElectrodeClick(event) {
@@ -1236,6 +1293,7 @@
 
         function navigateSegments(segmentIndex, electrodeId = null) {
             if (!appData || appData.segment_count === 0) return;
+            document.getElementById('searchStatus').textContent = '';
             currentSegmentIndex = segmentIndex;
             if (currentSegmentIndex < 0) currentSegmentIndex = appData.segment_count - 1;
             if (currentSegmentIndex >= appData.segment_count) currentSegmentIndex = 0;
@@ -1306,42 +1364,51 @@
         }
 
         function findSegmentForOrder(order) {
-            // Search across all segments for the global earliest/latest activation
-            const all = getAllActivations();
-            const valid = all
-                .map((v, i) => ({ val: v, idx: i }))
-                .filter(x => x.val !== 0 && Number.isFinite(x.val));
-            if (valid.length === 0) return currentSegmentIndex;
-            let chosen;
+            const valid = [];
+            for (let segmentId = 0; segmentId < appData.segment_count; segmentId++) {
+                if (adjudicatedSegmentIds.has(segmentId)) continue;
+                const activation = appData.activation_uni[segmentId] || [];
+                activation.forEach(value => {
+                    if (value !== 0 && Number.isFinite(value)) {
+                        valid.push({ val: value, segmentId });
+                    }
+                });
+            }
+            if (valid.length === 0) return null;
             if (order === 'earliest') {
-                chosen = valid.reduce((a, b) => (a.val <= b.val ? a : b));
-            } else {
-                chosen = valid.reduce((a, b) => (a.val >= b.val ? a : b));
+                return valid.reduce((a, b) => (a.val <= b.val ? a : b)).segmentId;
             }
-            // map flattened index back to segment index
-            let flat = chosen.idx;
-            for (let s = 0; s < appData.segment_count; s++) {
-                const segLen = (appData.electrode_positions[s] || []).length;
-                if (flat < segLen) return s;
-                flat -= segLen;
+            return valid.reduce((a, b) => (a.val >= b.val ? a : b)).segmentId;
+        }
+
+        function navigateToOrderedSegment(order) {
+            const targetSegment = findSegmentForOrder(order);
+            const searchStatus = document.getElementById('searchStatus');
+            if (targetSegment === null) {
+                document.getElementById('toggleEarliest').checked = false;
+                document.getElementById('toggleLatest').checked = false;
+                setSliderEnabled(true);
+                searchStatus.textContent = 'No unadjudicated activation signals remain.';
+                return;
             }
-            return currentSegmentIndex;
+
+            searchStatus.textContent = '';
+            currentSegmentIndex = targetSegment;
+            selectedElectrodeId = null;
+            document.getElementById('pageSlider').value = currentSegmentIndex;
+            updateSliderLabel();
+            updateSaveButton();
+            render3DPlot(true);
+            renderElectrogram();
         }
 
         document.getElementById('toggleEarliest').addEventListener('change', (e) => {
             if (e.target.checked) {
                 document.getElementById('toggleLatest').checked = false;
                 setSliderEnabled(false);
-                // find the segment containing the global earliest activation and navigate there
-                const targetSeg = findSegmentForOrder('earliest');
-                currentSegmentIndex = targetSeg;
-                selectedElectrodeId = null;
-                document.getElementById('pageSlider').value = currentSegmentIndex;
-                updateSliderLabel();
-                updateSaveButton();
-                render3DPlot(true);
-                renderElectrogram();
+                navigateToOrderedSegment('earliest');
             } else {
+                document.getElementById('searchStatus').textContent = '';
                 setSliderEnabled(true);
                 navigateSegments(parseInt(document.getElementById('pageSlider').value));
             }
@@ -1351,18 +1418,37 @@
             if (e.target.checked) {
                 document.getElementById('toggleEarliest').checked = false;
                 setSliderEnabled(false);
-                // find the segment containing the global latest activation and navigate there
-                const targetSeg = findSegmentForOrder('latest');
-                currentSegmentIndex = targetSeg;
-                selectedElectrodeId = null;
-                document.getElementById('pageSlider').value = currentSegmentIndex;
-                updateSliderLabel();
-                updateSaveButton();
-                render3DPlot(true);
-                renderElectrogram();
+                navigateToOrderedSegment('latest');
             } else {
+                document.getElementById('searchStatus').textContent = '';
                 setSliderEnabled(true);
                 navigateSegments(parseInt(document.getElementById('pageSlider').value));
+            }
+        });
+
+        document.getElementById('toggleAdjudicated').addEventListener('change', event => {
+            if (!appData || isSaving || isUpdatingWoi || isSwitchingMesh) {
+                updateAdjudicatedToggle();
+                return;
+            }
+
+            if (event.target.checked) {
+                adjudicatedSegmentIds.add(currentSegmentIndex);
+            } else {
+                adjudicatedSegmentIds.delete(currentSegmentIndex);
+            }
+            setSaveStatus(
+                hasUnsavedChanges() ? 'Unsaved changes.' : '',
+                hasUnsavedChanges() ? 'pending' : ''
+            );
+            updateSaveButton();
+            updateSliderAdjudication();
+
+            if (event.target.checked) {
+                const activeOrder = document.getElementById('toggleEarliest').checked
+                    ? 'earliest'
+                    : document.getElementById('toggleLatest').checked ? 'latest' : null;
+                if (activeOrder) navigateToOrderedSegment(activeOrder);
             }
         });
 
@@ -1500,7 +1586,7 @@
         });
 
         document.getElementById('btnSave').addEventListener('click', async () => {
-            if (!appData || isSaving || editedSegmentIds.size === 0) return;
+            if (!appData || isSaving || !hasUnsavedChanges()) return;
 
             const segmentIdsToSave = Array.from(editedSegmentIds).sort((a, b) => a - b);
             const segments = segmentIdsToSave.map(segmentId => ({
@@ -1515,7 +1601,14 @@
                 const response = await fetch('/api/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name_prefix: appData.name_prefix, segments })
+                    body: JSON.stringify({
+                        name_prefix: appData.name_prefix,
+                        segments,
+                        adjudicated_flag: Array.from(
+                            { length: appData.segment_count },
+                            (_, segmentId) => adjudicatedSegmentIds.has(segmentId)
+                        )
+                    })
                 });
                 const responseText = await response.text();
                 let result = {};
@@ -1530,19 +1623,25 @@
                     throw new Error(result.error || `HTTP ${response.status}`);
                 }
                 segmentIdsToSave.forEach(segmentId => editedSegmentIds.delete(segmentId));
+                savedAdjudicatedSegmentIds = new Set(adjudicatedSegmentIds);
                 const count = result.saved_segment_count ?? segmentIdsToSave.length;
-                setSaveStatus(`Saved ${count} edited segment${count === 1 ? '' : 's'}.`, 'success');
+                setSaveStatus(
+                    count > 0
+                        ? `Saved ${count} edited segment${count === 1 ? '' : 's'} and adjudication flags.`
+                        : 'Saved adjudication flags.',
+                    'success'
+                );
             } catch (err) {
-                console.error('Failed to save activation times:', err);
+                console.error('Failed to save catheter data:', err);
                 setSaveStatus(`Save failed: ${err.message}`, 'error');
-                alert(`Failed to save activation times: ${err.message}`);
+                alert(`Failed to save catheter data: ${err.message}`);
             } finally {
                 setSavingState(false);
             }
         });
 
         window.addEventListener('beforeunload', (event) => {
-            if (editedSegmentIds.size > 0) {
+            if (hasUnsavedChanges()) {
                 event.preventDefault();
                 event.returnValue = '';
             }

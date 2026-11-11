@@ -135,6 +135,17 @@ def load_mesh_data(name_prefix):
 
     electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
     segment_count = len(electrode_positions)
+    if 'adjudicated_flag' in catheter:
+        adjudicated_flag = np.asarray(catheter['adjudicated_flag'])
+        if adjudicated_flag.ndim != 1 or adjudicated_flag.shape[0] != segment_count:
+            raise ValueError(
+                'adjudicated_flag must contain one value per segment'
+            )
+        if not np.all(np.isin(adjudicated_flag, [False, True])):
+            raise ValueError('adjudicated_flag values must be boolean')
+        catheter['adjudicated_flag'] = adjudicated_flag.astype(bool)
+    else:
+        catheter['adjudicated_flag'] = np.zeros(segment_count, dtype=bool)
     segment_electrode_count = (
         int(electrode_positions[0].shape[0]) if segment_count else 0
     )
@@ -213,8 +224,8 @@ def load_mesh_data(name_prefix):
 def validate_activation_updates(payload):
     """Validate a batch of edited segments without changing server state."""
     updates = payload.get('segments')
-    if not isinstance(updates, list) or not updates:
-        raise ValueError('segments must be a non-empty list')
+    if not isinstance(updates, list):
+        raise ValueError('segments must be a list')
 
     validated = []
     seen_segment_ids = set()
@@ -264,6 +275,20 @@ def validate_activation_updates(payload):
         validated.append((segment_id, activation.astype(np.int64)))
 
     return validated
+
+
+def validate_adjudicated_flags(payload):
+    """Validate the complete per-segment adjudication state."""
+    flags = payload.get('adjudicated_flag')
+    if (
+        not isinstance(flags, list)
+        or len(flags) != data_store['segment_count']
+        or not all(isinstance(flag, bool) for flag in flags)
+    ):
+        raise ValueError(
+            'adjudicated_flag must contain one boolean value per segment'
+        )
+    return np.asarray(flags, dtype=bool)
 
 
 def updated_activation_array(source, updates):
@@ -595,6 +620,9 @@ def ui_data_payload():
             [np.asarray(channel, dtype=float).tolist() for channel in segment]
             for segment in data_store['activation_uni_all']
         ],
+        'adjudicated_flag': [
+            bool(flag) for flag in data_store['clinical_data']['adjudicated_flag']
+        ],
         'segment_count': int(data_store['segment_count']),
         'segment_electrode_count': int(data_store['segment_electrode_count']),
         'n_segments': int(data_store['segment_count']),
@@ -808,6 +836,7 @@ def save_activation_times():
             }), 409
         try:
             updates = validate_activation_updates(payload)
+            adjudicated_flag = validate_adjudicated_flags(payload)
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
 
@@ -820,19 +849,21 @@ def save_activation_times():
         updated_activation = updated_activation_array(clinical_data[activation_key], updates)
         data_to_save = dict(clinical_data)
         data_to_save[activation_key] = updated_activation
+        data_to_save['adjudicated_flag'] = adjudicated_flag
 
         try:
             atomic_savez(save_path, data_to_save)
         except Exception:
-            app.logger.exception('Failed to save activation times to %s', save_path)
+            app.logger.exception('Failed to save catheter data to %s', save_path)
             return jsonify({'error': 'Unable to write the catheter data file'}), 500
 
         # commit the new values to server memory only after the file replacement succeeds.
         clinical_data[activation_key] = updated_activation
+        clinical_data['adjudicated_flag'] = adjudicated_flag
         data_store['activation_uni'] = updated_activation
 
     saved_segment_ids = [segment_id for segment_id, _ in updates]
-    print(f"Saved activation times for segments {saved_segment_ids} to {save_path}")
+    print(f"Saved catheter data for segments {saved_segment_ids} to {save_path}")
     return jsonify({
         'status': 'ok',
         'path': str(save_path),

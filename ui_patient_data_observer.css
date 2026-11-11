@@ -259,6 +259,42 @@ button:disabled {
     margin-bottom: 10px;
 }
 
+.segment-navigation-group {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+}
+
+.segment-navigation-row {
+    position: relative;
+    top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+button#btnPrev,
+button#btnNext {
+    margin: 0 5px;
+}
+
+.adjudicated-toggle {
+    position: relative;
+    top: 56.5px;
+    gap: 4px;
+}
+
+.adjudicated-toggle .toggle-text {
+    font-size: 12px;
+}
+
+.search-status {
+    flex: 0 0 auto;
+    color: #b42318;
+    font-size: 12px;
+}
+
 input[type='range'] {
     width: 1000px;
     height: 6px;
