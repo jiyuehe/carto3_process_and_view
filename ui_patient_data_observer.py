@@ -123,6 +123,38 @@ def prepare_surface_distance_data(vertices, faces, sample_points):
     }
 
 
+def calculate_electrogram_display_scale(egm_uni_original):
+    peak_to_peak_values = []
+    for segment in egm_uni_original:
+        segment = np.asarray(segment, dtype=float)
+        if segment.ndim != 2:
+            raise ValueError(
+                'Original unipolar electrograms must have samples-by-electrodes shape'
+            )
+        for channel in range(segment.shape[1]):
+            finite_signal = segment[:, channel]
+            finite_signal = finite_signal[np.isfinite(finite_signal)]
+            if finite_signal.size:
+                peak_to_peak = float(np.ptp(finite_signal))
+                if np.isfinite(peak_to_peak):
+                    peak_to_peak_values.append(peak_to_peak)
+
+    if not peak_to_peak_values:
+        raise ValueError('No finite original electrograms available to determine display scale')
+    percentile_20, percentile_80 = np.percentile(peak_to_peak_values, [20, 80])
+    middle_peak_to_peak_values = [
+        value for value in peak_to_peak_values
+        if percentile_20 <= value <= percentile_80
+    ]
+    electrogram_peak_to_peak_median = float(np.median(middle_peak_to_peak_values))
+    if (
+        not np.isfinite(electrogram_peak_to_peak_median)
+        or electrogram_peak_to_peak_median <= 0
+    ):
+        raise ValueError('Original electrograms do not produce a positive display scale')
+    return electrogram_peak_to_peak_median
+
+
 def load_mesh_data(name_prefix):
     catheter = load_npz_values(directory['data'] / f'{name_prefix}_carto_catheter_processed.npz')
     with np.load(
@@ -132,6 +164,9 @@ def load_mesh_data(name_prefix):
         egm_uni_original = np.asarray(
             original_catheter['mapping_electrogram_unipolar'], dtype=object
         )
+    electrogram_peak_to_peak_median = calculate_electrogram_display_scale(
+        egm_uni_original
+    )
 
     electrode_positions = np.asarray(catheter['electrode_positions'], dtype=object)
     segment_count = len(electrode_positions)
@@ -212,6 +247,7 @@ def load_mesh_data(name_prefix):
         'original_surface_data': original_surface_data,
         'refined_surface_data': refined_surface_data,
         'egm_uni_original': egm_uni_original,
+        'electrogram_peak_to_peak_median': electrogram_peak_to_peak_median,
         'egm_uni_qrs_subtracted': egm_uni_qrs_subtracted,
         'egm_ref': egm_ref,
         'activation_uni': activation_uni,
@@ -620,6 +656,9 @@ def ui_data_payload():
         ],
         'mesh_activation': [None] * len(data_store['refined_mesh_vertex']),
         'mesh_phase': [None] * len(data_store['refined_mesh_vertex']),
+        'electrogram_peak_to_peak_median': float(
+            data_store['electrogram_peak_to_peak_median']
+        ),
         'median_cycle_length': (
             float(data_store['median_cycle_length'])
             if np.isfinite(data_store['median_cycle_length']) else None

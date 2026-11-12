@@ -1038,6 +1038,7 @@
             const requestId = ++electrogramRequestId;
             const activationUni = getCurrentActivation();
             const shiftSpacing = 3;
+            const electrogramScale = appData.electrogram_peak_to_peak_median;
 
             let electrogramData;
             try {
@@ -1081,12 +1082,16 @@
                 }
 
                 const t = egmUni.map((_, idx) => idx);
-                const egmUniShifted = egmUni.map(val => val + i * shiftSpacing);
+                const egmUniShifted = egmUni.map(
+                    val => val / electrogramScale + i * shiftSpacing
+                );
                 const visibleSignals = [egmUniShifted];
 
                 if (Array.isArray(egmRefData[eId]) && egmRefData[eId].length > 0) {
                     const egmRef = egmRefData[eId];
-                    const egmRefShifted = egmRef.map(val => val + i * shiftSpacing);
+                    const egmRefShifted = egmRef.map(
+                        val => val / electrogramScale + i * shiftSpacing
+                    );
                     visibleSignals.push(egmRefShifted);
                     referenceTraces.push({
                         type: 'scatter',
@@ -1111,7 +1116,9 @@
 
                 if (Array.isArray(egmUniQrsSubtractedData[eId]) && egmUniQrsSubtractedData[eId].length > 0) {
                     const egmUniQrsSubtracted = egmUniQrsSubtractedData[eId];
-                    const egmUniQrsSubtractedShifted = egmUniQrsSubtracted.map(val => val + i * shiftSpacing);
+                    const egmUniQrsSubtractedShifted = egmUniQrsSubtracted.map(
+                        val => val / electrogramScale + i * shiftSpacing
+                    );
                     visibleSignals.push(egmUniQrsSubtractedShifted);
                     qrsSubtractedTraces.push({
                         type: 'scatter',
@@ -1130,7 +1137,8 @@
                         && Number.isFinite(activationUni[eId])
                         && activationUni[eId] < egmUniQrsSubtracted.length) {
                     const actTime = activationUni[eId];
-                    const actValue = egmUniQrsSubtracted[actTime] + i * shiftSpacing;
+                    const actValue = egmUniQrsSubtracted[actTime] / electrogramScale
+                        + i * shiftSpacing;
                     activationTraces.push({
                         type: 'scatter',
                         mode: 'markers',
@@ -1161,7 +1169,8 @@
                         mode: 'markers',
                         x: otherActivationTimes,
                         y: otherActivationTimes.map(
-                            actTime => egmUniQrsSubtracted[actTime] + i * shiftSpacing
+                            actTime => egmUniQrsSubtracted[actTime] / electrogramScale
+                                + i * shiftSpacing
                         ),
                         marker: {
                             symbol: 'circle',
