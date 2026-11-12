@@ -782,18 +782,49 @@ def update_window_of_interest():
     if woi_start < 0 or woi_start >= woi_end:
         return jsonify({'error': 'WOI must satisfy 0 <= start < end'}), 400
 
-    electrograms = data_store['egm_uni_qrs_subtracted']
-    sample_counts = [np.asarray(segment).shape[0] for segment in electrograms]
-    if not sample_counts or woi_end > min(sample_counts):
-        return jsonify({
-            'error': f'WOI end must not exceed the electrogram length ({min(sample_counts, default=0)})'
-        }), 400
-
     with save_lock:
+        processed_path = (
+            data_store['directory']['data']
+            / f"{data_store['name_prefix']}_carto_catheter_processed.npz"
+        )
+        try:
+            with np.load(processed_path, allow_pickle=True) as processed_catheter:
+                activation_candidates = np.asarray(
+                    processed_catheter['mapping_electrogram_unipolar_activation'],
+                    dtype=object,
+                )
+                qrs_subtracted = np.asarray(
+                    processed_catheter[
+                        'mapping_electrogram_unipolar_qrs_subtracted'
+                    ],
+                    dtype=object,
+                )
+        except Exception:
+            app.logger.exception(
+                'Failed to read activation candidates from %s', processed_path
+            )
+            return jsonify({
+                'error': 'Unable to read activation candidates from the processed data file'
+            }), 500
+
+        sample_counts = [
+            np.asarray(segment).shape[0] for segment in qrs_subtracted
+        ]
+        if not sample_counts or woi_end > min(sample_counts):
+            return jsonify({
+                'error': f'WOI end must not exceed the electrogram length ({min(sample_counts, default=0)})'
+            }), 400
+
         # Recompute on a detached dictionary so a failed calculation cannot leave
-        # the shared catheter state partially updated.
+        # the shared catheter state partially updated. Use candidate activations
+        # read from disk for every WOI change, not the in-memory copy.
         updated_catheter = utility.ui_functions.grab_activations_within_window_of_interest(
-            dict(data_store['clinical_data']), woi_start, woi_end
+            {
+                'mapping_electrogram_unipolar_activation': activation_candidates,
+                'mapping_electrogram_unipolar_qrs_subtracted': qrs_subtracted,
+            },
+            woi_start,
+            woi_end,
         )
         activation_key = 'mapping_electrogram_unipolar_activation_within_woi'
         updated_activation = updated_catheter[activation_key]
