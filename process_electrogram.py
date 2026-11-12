@@ -51,12 +51,12 @@ for i in range(0,len(patients)):
 print(f'Number of left atrium clinical maps: {n_good}')
 print(f'Sinus rhythm: {n_sinus_rhythm} \nTachycardia: {n_tachycardia} \nFlutter: {n_flutter}')
 
-sinus_rhythm_map_ids = list(range(0,0))
+sinus_rhythm_map_ids = [20, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49]
 map_ids = [29]
 
 #%%
 suffix = '_carto_catheter.npz'
-for map_id in map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
+for map_id in sinus_rhythm_map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
     patient = patients[map_id]
 
     if patient['atrium_flag'] == 'LA' and 'bad.' not in patient['quality']:
