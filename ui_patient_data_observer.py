@@ -167,7 +167,7 @@ def load_mesh_data(name_prefix):
     ]
     catheter['mapping_electrogram_unipolar_activation_all'] = activation_uni_all
 
-    median_cycle_length = int(catheter['cycle_length'])
+    median_cycle_length = float(np.asarray(catheter['cycle_length']).item())
 
     electrode_positions_all = (
         np.vstack([
@@ -289,6 +289,20 @@ def validate_adjudicated_flags(payload):
             'adjudicated_flag must contain one boolean value per segment'
         )
     return np.asarray(flags, dtype=bool)
+
+
+def validate_cycle_length(payload):
+    """Validate the activation range without changing server state."""
+    cycle_length = payload.get('cycle_length')
+    if isinstance(cycle_length, bool) or not isinstance(cycle_length, (int, float)):
+        raise ValueError('cycle_length must be a positive number')
+    try:
+        cycle_length = float(cycle_length)
+    except OverflowError as exc:
+        raise ValueError('cycle_length must be a positive number') from exc
+    if not np.isfinite(cycle_length) or cycle_length <= 0:
+        raise ValueError('cycle_length must be a positive number')
+    return cycle_length
 
 
 def updated_activation_array(source, updates):
@@ -868,6 +882,7 @@ def save_activation_times():
         try:
             updates = validate_activation_updates(payload)
             adjudicated_flag = validate_adjudicated_flags(payload)
+            cycle_length = validate_cycle_length(payload)
         except ValueError as exc:
             return jsonify({'error': str(exc)}), 400
 
@@ -881,6 +896,7 @@ def save_activation_times():
         data_to_save = dict(clinical_data)
         data_to_save[activation_key] = updated_activation
         data_to_save['adjudicated_flag'] = adjudicated_flag
+        data_to_save['cycle_length'] = cycle_length
 
         try:
             atomic_savez(save_path, data_to_save)
@@ -891,7 +907,9 @@ def save_activation_times():
         # commit the new values to server memory only after the file replacement succeeds.
         clinical_data[activation_key] = updated_activation
         clinical_data['adjudicated_flag'] = adjudicated_flag
+        clinical_data['cycle_length'] = cycle_length
         data_store['activation_uni'] = updated_activation
+        data_store['median_cycle_length'] = cycle_length
 
     saved_segment_ids = [segment_id for segment_id, _ in updates]
     print(f"Saved catheter data for segments {saved_segment_ids} to {save_path}")

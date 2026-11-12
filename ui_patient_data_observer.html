@@ -104,6 +104,7 @@
         const editedSegmentIds = new Set();
         let adjudicatedSegmentIds = new Set();
         let savedAdjudicatedSegmentIds = new Set();
+        let savedCycleLength = null;
         let isSaving = false;
         let isUpdatingWoi = false;
         let isSwitchingMesh = false;
@@ -116,6 +117,7 @@
 
         function hasUnsavedChanges() {
             return editedSegmentIds.size > 0
+                || (appData !== null && appData.median_cycle_length !== savedCycleLength)
                 || adjudicatedSegmentIds.size !== savedAdjudicatedSegmentIds.size
                 || [...adjudicatedSegmentIds].some(
                     segmentId => !savedAdjudicatedSegmentIds.has(segmentId)
@@ -156,6 +158,7 @@
             document.getElementById('toggleAdjudicated').disabled = saving;
             document.getElementById('woiStart').disabled = saving;
             document.getElementById('woiEnd').disabled = saving;
+            document.getElementById('cycleLength').disabled = saving;
             document.getElementById('meshSelector').disabled = saving;
 
             if (saving) {
@@ -372,6 +375,7 @@
                     .filter(segmentId => segmentId !== null)
             );
             savedAdjudicatedSegmentIds = new Set(adjudicatedSegmentIds);
+            savedCycleLength = appData.median_cycle_length;
             document.getElementById('searchStatus').textContent = '';
 
             const meshSelector = document.getElementById('meshSelector');
@@ -416,7 +420,7 @@
             const previousName = appData.name_prefix;
             if (selectedName === previousName) return;
             if (hasUnsavedChanges() && !window.confirm(
-                'Changing meshes will discard all unsaved activation and adjudication edits. Continue?'
+                'Changing meshes will discard all unsaved activation, range, and adjudication edits. Continue?'
             )) {
                 event.target.value = previousName;
                 return;
@@ -1473,6 +1477,9 @@
             if (cycleLength === appData.median_cycle_length) return true;
 
             appData.median_cycle_length = cycleLength;
+            updateSaveButton();
+            const hasChanges = hasUnsavedChanges();
+            setSaveStatus(hasChanges ? 'Unsaved changes.' : '', hasChanges ? 'pending' : '');
             render3DPlot(true);
             if (document.getElementById('toggleInterpolateMesh').checked) {
                 refreshMeshInterpolation().catch(err => console.error('Interpolation failed:', err));
@@ -1586,9 +1593,10 @@
         });
 
         document.getElementById('btnSave').addEventListener('click', async () => {
-            if (!appData || isSaving || !hasUnsavedChanges()) return;
+            if (!appData || isSaving || !updateCycleLength() || !hasUnsavedChanges()) return;
 
             const segmentIdsToSave = Array.from(editedSegmentIds).sort((a, b) => a - b);
+            const cycleLengthToSave = appData.median_cycle_length;
             const segments = segmentIdsToSave.map(segmentId => ({
                 segment_id: segmentId,
                 activation_uni: appData.activation_uni[segmentId]
@@ -1604,6 +1612,7 @@
                     body: JSON.stringify({
                         name_prefix: appData.name_prefix,
                         segments,
+                        cycle_length: cycleLengthToSave,
                         adjudicated_flag: Array.from(
                             { length: appData.segment_count },
                             (_, segmentId) => adjudicatedSegmentIds.has(segmentId)
@@ -1624,11 +1633,12 @@
                 }
                 segmentIdsToSave.forEach(segmentId => editedSegmentIds.delete(segmentId));
                 savedAdjudicatedSegmentIds = new Set(adjudicatedSegmentIds);
+                savedCycleLength = cycleLengthToSave;
                 const count = result.saved_segment_count ?? segmentIdsToSave.length;
                 setSaveStatus(
                     count > 0
-                        ? `Saved ${count} edited segment${count === 1 ? '' : 's'} and adjudication flags.`
-                        : 'Saved adjudication flags.',
+                        ? `Saved ${count} edited segment${count === 1 ? '' : 's'}, activation range, and adjudication flags.`
+                        : 'Saved activation range and adjudication flags.',
                     'success'
                 );
             } catch (err) {
