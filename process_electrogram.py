@@ -52,7 +52,7 @@ print(f'Number of left atrium clinical maps: {n_good}')
 print(f'Sinus rhythm: {n_sinus_rhythm} \nTachycardia: {n_tachycardia} \nFlutter: {n_flutter}')
 
 sinus_rhythm_map_ids = list(range(0,0))
-map_ids = [10]
+map_ids = [29]
 
 #%%
 suffix = '_carto_catheter.npz'
