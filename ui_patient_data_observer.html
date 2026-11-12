@@ -526,18 +526,13 @@
             const maxVal = range.max;
             const span = Math.max(maxVal - minVal, 1e-9);
             const fullHue = document.getElementById('toggleFullHue').checked;
-            const cycleLength = Number(appData?.median_cycle_length);
 
             return activation.map(act => {
                 if (act === 0 || !Number.isFinite(act)) {
                     return 'rgb(128,128,128)';
                 }
 
-                if (fullHue && Number.isFinite(cycleLength) && cycleLength > 0) {
-                    const phase = ((act - minVal) / cycleLength % 1 + 1) % 1;
-                    return getActivationColor(phase, true);
-                }
-                return getActivationColor((act - minVal) / span);
+                return getActivationColor((act - minVal) / span, fullHue);
             });
         }
 
@@ -617,7 +612,6 @@
             const payloadBody = {
                 activation_all: getAllActivations(),
                 full_hsv: document.getElementById('toggleFullHue').checked,
-                cycle_length: appData.median_cycle_length,
                 mesh_type: isRefinedMeshSelected() ? 'refined' : 'original'
             };
             const response = await fetch('/api/interpolate', {

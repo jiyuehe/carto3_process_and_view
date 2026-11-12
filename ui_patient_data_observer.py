@@ -591,25 +591,26 @@ def interpolate_activation_to_mesh(
 
 def interpolate_activation_phase_to_mesh(
     activation,
-    cycle_length,
     sample_points,
     mesh_vertices,
     surface_data,
 ):
-    """Circularly interpolate activation phase for the Full HSV colorscale."""
+    """Circularly interpolate min-to-max normalized activation for Full HSV."""
     activation = np.asarray(activation, dtype=np.float64)
     mesh_vertices = np.asarray(mesh_vertices, dtype=np.float64)
     sample_points = np.asarray(sample_points, dtype=np.float64)
+    valid_activation = np.isfinite(activation) & (activation != 0)
     # A rejected projection is [NaN, NaN, NaN] and must not contribute.
-    valid = np.isfinite(activation) & (activation != 0) & np.all(
-        np.isfinite(sample_points), axis=1
-    )
+    valid = valid_activation & np.all(np.isfinite(sample_points), axis=1)
     empty = np.full(len(mesh_vertices), np.nan)
-    if not np.any(valid) or not np.isfinite(cycle_length) or cycle_length <= 0:
+    if not np.any(valid):
         return empty, empty.copy(), np.nan
 
-    phase_origin = float(np.min(activation[valid]))
-    phase = np.mod((activation[valid] - phase_origin) / cycle_length, 1.0)
+    phase_origin = float(np.min(activation[valid_activation]))
+    activation_span = max(
+        float(np.max(activation[valid_activation]) - phase_origin), 1e-9
+    )
+    phase = (activation[valid] - phase_origin) / activation_span
     all_phase = np.full(len(activation), np.nan, dtype=np.float64)
     all_phase[valid] = phase
     smoothed_phase = smooth_projected_samples(
@@ -777,18 +778,8 @@ def interpolate_activation():
             for index, segment in enumerate(data_store['activation_uni'])
         ])
     if payload.get('full_hsv') is True:
-        cycle_length = payload.get('cycle_length', data_store['median_cycle_length'])
-        if isinstance(cycle_length, bool):
-            return jsonify({'error': 'cycle length must be a positive number'}), 400
-        try:
-            cycle_length = float(cycle_length)
-        except (TypeError, ValueError):
-            return jsonify({'error': 'cycle length must be a positive number'}), 400
-        if not np.isfinite(cycle_length) or cycle_length <= 0:
-            return jsonify({'error': 'cycle length must be a positive number'}), 422
         mesh_phase, phase_confidence, phase_origin = interpolate_activation_phase_to_mesh(
             activation_all,
-            cycle_length,
             sample_points,
             mesh_vertices,
             surface_data,
@@ -799,7 +790,6 @@ def interpolate_activation():
             'mesh_phase_confidence': [None if not np.isfinite(value) else float(value)
                                       for value in phase_confidence],
             'phase_origin': phase_origin,
-            'cycle_length': float(cycle_length),
         }))
 
     mesh_activation = interpolate_activation_to_mesh(
