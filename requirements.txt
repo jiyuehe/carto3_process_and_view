@@ -3,3 +3,5 @@ scipy
 flask
 plotly
 matplotlib
+Pillow
+pandas
