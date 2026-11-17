@@ -799,7 +799,7 @@
                 y: activePosns.map(p => p[1]),
                 z: activePosns.map(p => p[2]),
                 customdata: activeIds,
-                marker: { size: 4, color: activeColors, opacity: 1 },
+                marker: { size: 5, color: activeColors, opacity: 1 },
                 showlegend: false, hovertemplate: electrodeHover,
             };
 
@@ -810,7 +810,7 @@
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
                 customdata: inactiveIds,
-                marker: { size: 2, color: inactiveColors, opacity: 0.1 },
+                marker: { size: 5, color: inactiveColors, opacity: 0.1 },
                 showlegend: false, hovertemplate: electrodeHover,
             };
 
@@ -841,7 +841,7 @@
                 y: otherActivePosns.map(p => p[1]),
                 z: otherActivePosns.map(p => p[2]),
                 customdata: otherActiveIds,
-                marker: { size: 2, color: otherActiveColors, opacity: 0.8 },
+                marker: { size: 5, color: otherActiveColors, opacity: 0.8 },
                 showlegend: false, hovertemplate: electrodeHover
             };
 
@@ -852,7 +852,7 @@
                 y: otherInactivePosns.map(p => p[1]),
                 z: otherInactivePosns.map(p => p[2]),
                 customdata: otherInactiveIds,
-                marker: { size: 2, color: otherInactiveColors, opacity: 0.1 },
+                marker: { size: 5, color: otherInactiveColors, opacity: 0.1 },
                 showlegend: false, hovertemplate: electrodeHover
             };
 
@@ -869,20 +869,6 @@
                 textfont: { size: 16, color: '#000000', family: 'Arial, sans-serif' },
                 showlegend: false,
                 hovertemplate: electrodeHover,
-            };
-
-            const selectedPosition = selectedElectrodeId === null
-                ? null : electrodePositions[selectedElectrodeId];
-            const selectedElectrodeTrace = {
-                type: 'scatter3d',
-                mode: 'markers',
-                x: selectedPosition ? [selectedPosition[0]] : [],
-                y: selectedPosition ? [selectedPosition[1]] : [],
-                z: selectedPosition ? [selectedPosition[2]] : [],
-                customdata: selectedPosition ? [[currentSegmentIndex, selectedElectrodeId]] : [],
-                marker: { size: 9, color: '#ffcc00', opacity: 0.85 },
-                showlegend: false,
-                hovertemplate: electrodeHover
             };
 
             const layout = {
@@ -912,8 +898,7 @@
                 electrodeInactiveTrace,
                 otherSegmentsActiveTrace,
                 otherSegmentsInactiveTrace,
-                electrodeLabelTrace,
-                selectedElectrodeTrace
+                electrodeLabelTrace
             ], layout, {
                 responsive: true
             }).then(() => {
