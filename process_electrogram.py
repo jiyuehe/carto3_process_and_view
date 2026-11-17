@@ -54,6 +54,61 @@ print(f'Sinus rhythm: {n_sinus_rhythm} \nTachycardia: {n_tachycardia} \nFlutter:
 sinus_rhythm_map_ids = [20, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49]
 map_ids = [29]
 
+# some statistics
+do_flag = 0
+if do_flag == 1:
+    n_recording_segments = np.zeros(len(patients), dtype=int)
+    n_electrode = np.zeros(len(patients), dtype=int)
+    for map_id in range(len(patients)):
+        patient = patients[map_id]
+
+        name_prefix = f'{patient['id']}_{patient['mesh']}'
+        print(f'{name_prefix}')
+
+        data = np.load(directory['data'] / f'{name_prefix}_carto_catheter.npz', allow_pickle=True)
+        catheter = {k: data[k] for k in data.files}
+
+        n_recording_segments[map_id] = len(catheter['mapping_electrogram_unipolar'])
+
+        n = np.zeros(n_recording_segments[map_id], dtype=int)
+        for n_segment in range(n_recording_segments[map_id]):
+            n[n_segment] = catheter['mapping_electrogram_unipolar'][n_segment].shape[1]
+        n_electrode[map_id] = np.sum(n)
+
+    print(f'number of recording segments: average {n_recording_segments.mean():.1f}, median {np.median(n_recording_segments):.1f}')
+    print(f'number of electrodes: average {n_electrode.mean():.1f}, median {np.median(n_electrode):.1f}')
+
+    # plot histograms side by side
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    axes[0].hist(n_recording_segments, bins=10)
+    axes[0].set_xlabel('number of catheter recording segments')
+    axes[0].set_ylabel('number of patients')
+    axes[0].set_title('Catheter recording segments per patient')
+    axes[0].text(
+        0.98, 0.98,
+        f'Mean: {n_recording_segments.mean():.1f}\nMedian: {np.median(n_recording_segments):.1f}',
+        transform=axes[0].transAxes,
+        ha='right',
+        va='top',
+    )
+
+    axes[1].hist(n_electrode, bins=10)
+    axes[1].set_xlabel('number of total electrodes')
+    axes[1].set_ylabel('number of patients')
+    axes[1].set_title('Electrodes per patient')
+    axes[1].text(
+        0.98, 0.98,
+        f'Mean: {n_electrode.mean():.1f}\nMedian: {np.median(n_electrode):.1f}',
+        transform=axes[1].transAxes,
+        ha='right',
+        va='top',
+    )
+
+    fig.tight_layout()
+
+    # save as png
+    fig.savefig('result/catheter_recording_segments_and_electrodes_histogram.png', dpi=300)
+
 #%%
 suffix = '_carto_catheter.npz'
 for map_id in sinus_rhythm_map_ids: # map_ids: # sinus_rhythm_map_ids: #range(0,len(patients)):
