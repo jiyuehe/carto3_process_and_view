@@ -270,7 +270,7 @@
                 const reference = neighbors.length % 2
                     ? neighbors[middle]
                     : (neighbors[middle - 1] + neighbors[middle]) / 2;
-                if (Math.abs(sample.value - reference) >= 20) {
+                if (Math.abs(sample.value - reference) >= 50) {
                     outliers.push({ segmentId: sample.segmentId, electrodeId: sample.electrodeId });
                 }
             }
@@ -810,7 +810,7 @@
                 y: inactivePosns.map(p => p[1]),
                 z: inactivePosns.map(p => p[2]),
                 customdata: inactiveIds,
-                marker: { size: 5, color: inactiveColors, opacity: 0.1 },
+                marker: { size: 2, color: inactiveColors, opacity: 0.1 },
                 showlegend: false, hovertemplate: electrodeHover,
             };
 
@@ -852,7 +852,7 @@
                 y: otherInactivePosns.map(p => p[1]),
                 z: otherInactivePosns.map(p => p[2]),
                 customdata: otherInactiveIds,
-                marker: { size: 5, color: otherInactiveColors, opacity: 0.1 },
+                marker: { size: 2, color: otherInactiveColors, opacity: 0.1 },
                 showlegend: false, hovertemplate: electrodeHover
             };
 
